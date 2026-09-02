@@ -313,7 +313,8 @@ The choice of cloud backend/hosting platform (self-hosted server, managed IoT pl
   * Authenticates each device with a unique per-device credential (not a shared/default key).
   * Receives telemetry (the same data shown on the local UI) and stores recent history.
   * Accepts commands from an authenticated user session and forwards them to the device.
-  * Ties devices to user accounts via a **pairing/commissioning step** (e.g. scan a QR code on the unit, or enter its device ID + a one-time PIN, during first-time setup on the installer's phone).
+  * Ties devices to user accounts via a **pairing/commissioning step**: each unit ships with a **static QR code printed on an enclosure label at manufacture** (the unit has no display of its own — Section 12's web UI is its only screen, so the code can't be shown dynamically). The label also carries the device ID and a claim code in plain text as a human-readable fallback for when a camera isn't available or convenient. The phone's camera scans this label during first-time setup; scanning is handled client-side by the web app (Section 12), not by the device.
+  * The same pairing flow must let the installer or customer **create a new cloud account on the spot**, not only sign in to an existing one — first-time setup is realistically the first time most installers touch the app, so requiring a pre-existing account before a device can be claimed would be a dead end in the field.
   * Exposes its telemetry/command API cleanly enough that the prototype web app and the future native app are just two different clients of the same API (see "Prototype vs. production front end" above).
 * The phone reaches the cloud backend over **any internet connection** — home Wi-Fi, other Wi-Fi, or mobile data — via the mobile-responsive web app. It never needs to be on the device's LAN.
 * Telemetry is pushed/polled at a low rate (e.g. every 5–10 s) plus immediately on state changes (mode switch, fault raised/cleared, heating start/stop) — this is a monitoring/UX channel, not a control loop.
@@ -328,7 +329,7 @@ The choice of cloud backend/hosting platform (self-hosted server, managed IoT pl
 ### Security
 
 * TLS with certificate verification on the ESP32's outbound connection; no plaintext telemetry or control traffic.
-* Per-device unique keys/credentials issued at manufacture or commissioning — never a shared secret across units.
+* Per-device unique keys/credentials issued at manufacture or commissioning — never a shared secret across units. The printed claim code is one factor in claiming a device, not the device's own cloud credential — a lost/photographed label lets someone claim an unclaimed unit, not take over an already-claimed one or impersonate the device's own outbound connection.
 * Remote control requires an authenticated user session tied to the paired account; no anonymous or public control endpoint.
 * Installer-only settings (Section 22) remain gated the same way remotely as they are locally.
 
