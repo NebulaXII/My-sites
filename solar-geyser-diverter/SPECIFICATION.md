@@ -296,6 +296,8 @@ The user must be able to view — and, subject to the safeguards below, control 
 
 The Section 12 web server hosted directly on the ESP32 only answers requests from devices on the same LAN, so it cannot satisfy this on its own. Remote access requires the device to reach out to a cloud service, since the installation's home router will not normally have inbound ports opened to it.
 
+The choice of cloud backend/hosting platform (self-hosted server, managed IoT platform, etc.) is left to the programmer to propose, along with its ongoing hosting cost and ownership terms — see the deliverable in Section 30.
+
 ### Architecture
 
 * The ESP32-S3 keeps its local Wi-Fi/AP + on-device web server from Sections 11–12 for on-site use. **This local path must keep working with zero dependency on the internet** — it is the same path used for commissioning and for on-site fault diagnosis when the internet is down.
