@@ -268,6 +268,8 @@ Loss of Wi-Fi must **not** cause uncontrolled geyser operation.
 
 For Rev A4, a **responsive web interface hosted by the ESP32** is required for **on-site** use, plus **remote/cloud access** as described in Section 13 for use from any network.
 
+**The prototype's user interface is a web app throughout — a browser-based, mobile-responsive page, not a native/store-installed app.** This applies both locally (served by the ESP32) and remotely (served by the cloud backend in Section 13). A native mobile app is production/future scope — see Section 13.
+
 The user should be able to open the controller from a phone, whether on the same Wi-Fi as the unit or away from it.
 
 Main screen should display:
@@ -298,6 +300,11 @@ The Section 12 web server hosted directly on the ESP32 only answers requests fro
 
 The choice of cloud backend/hosting platform (self-hosted server, managed IoT platform, etc.) is left to the programmer to propose, along with its ongoing hosting cost and ownership terms — see the deliverable in Section 30.
 
+### Prototype vs. production front end
+
+* **Prototype (Rev A4): web app only.** The remote UI is a mobile-responsive web page served by the cloud backend and opened in the phone's browser (optionally "add to home screen") — no native/store-installed app is built for the prototype.
+* **Production (future): native app.** A native iOS/Android app is planned for the production release. It is **out of scope for Rev A4 firmware/prototype work**, but the cloud backend's API (telemetry + command endpoints) must be a clean, documented REST/WebSocket (or equivalent) interface consumed by the prototype web app exactly as a future native app would consume it — i.e. the backend must not be built in a way that is tied to the web app and would need redesigning when the native app is added later.
+
 ### Architecture
 
 * The ESP32-S3 keeps its local Wi-Fi/AP + on-device web server from Sections 11–12 for on-site use. **This local path must keep working with zero dependency on the internet** — it is the same path used for commissioning and for on-site fault diagnosis when the internet is down.
@@ -307,7 +314,8 @@ The choice of cloud backend/hosting platform (self-hosted server, managed IoT pl
   * Receives telemetry (the same data shown on the local UI) and stores recent history.
   * Accepts commands from an authenticated user session and forwards them to the device.
   * Ties devices to user accounts via a **pairing/commissioning step** (e.g. scan a QR code on the unit, or enter its device ID + a one-time PIN, during first-time setup on the installer's phone).
-* The phone reaches the cloud backend over **any internet connection** — home Wi-Fi, other Wi-Fi, or mobile data — via a mobile-responsive web page or app. It never needs to be on the device's LAN.
+  * Exposes its telemetry/command API cleanly enough that the prototype web app and the future native app are just two different clients of the same API (see "Prototype vs. production front end" above).
+* The phone reaches the cloud backend over **any internet connection** — home Wi-Fi, other Wi-Fi, or mobile data — via the mobile-responsive web app. It never needs to be on the device's LAN.
 * Telemetry is pushed/polled at a low rate (e.g. every 5–10 s) plus immediately on state changes (mode switch, fault raised/cleared, heating start/stop) — this is a monitoring/UX channel, not a control loop.
 
 ### Safety boundary (must not be weakened by adding this feature)
@@ -760,8 +768,8 @@ Please provide:
 3. Pin configuration
 4. Configuration file
 5. Inverter communication module
-6. Web interface (local + remote, per Section 13)
-7. Cloud backend / pairing service required for remote access, and its hosting/ownership terms
+6. Web app (local + remote, per Section 13) — the prototype's only front end; no native app is in scope for this phase
+7. Cloud backend / pairing service required for remote access, and its hosting/ownership terms — its API must be documented well enough to support a future native app as a second client without redesign
 8. Installation instructions
 9. Programming instructions
 10. Fault-code list
