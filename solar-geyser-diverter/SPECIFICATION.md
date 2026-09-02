@@ -788,4 +788,4 @@ The programmer may use open-source libraries, but must provide a list of those l
 
 Follow the prototype development order in Section 28 — this lets the low-voltage "brain" of the product be tested and validated before any work begins on the 230 V power stage.
 
-A companion **ESP32-S3 pin assignment + software I/O table** (GPIO number → exact function → input/output → active state → connector pin) should be produced alongside this specification before firmware work begins.
+See the companion **`PIN_ASSIGNMENT.md`** (GPIO number → exact function → input/output → active state) for a proposed starting reference — final GPIO numbers must be confirmed against the approved schematic before wiring.
