@@ -266,9 +266,9 @@ Loss of Wi-Fi must **not** cause uncontrolled geyser operation.
 
 ## 12. User interface
 
-For Rev A4, a **responsive web interface hosted by the ESP32** is acceptable.
+For Rev A4, a **responsive web interface hosted by the ESP32** is required for **on-site** use, plus **remote/cloud access** as described in Section 13 for use from any network.
 
-The user should be able to open the controller from a phone.
+The user should be able to open the controller from a phone, whether on the same Wi-Fi as the unit or away from it.
 
 Main screen should display:
 
@@ -284,10 +284,47 @@ Main screen should display:
 * Source
 * Heating status
 * Fault status
+* Connection status (local / remote / offline)
 
 ---
 
-## 13. User modes
+## 13. Remote access (any network)
+
+### Requirement
+
+The user must be able to view — and, subject to the safeguards below, control — the geyser diverter **from a phone on any network** (a different Wi-Fi network, cellular data, another location entirely), not only when the phone is on the same local Wi-Fi as the unit.
+
+The Section 12 web server hosted directly on the ESP32 only answers requests from devices on the same LAN, so it cannot satisfy this on its own. Remote access requires the device to reach out to a cloud service, since the installation's home router will not normally have inbound ports opened to it.
+
+### Architecture
+
+* The ESP32-S3 keeps its local Wi-Fi/AP + on-device web server from Sections 11–12 for on-site use. **This local path must keep working with zero dependency on the internet** — it is the same path used for commissioning and for on-site fault diagnosis when the internet is down.
+* In addition, the ESP32-S3 opens an **outbound**, TLS-encrypted connection to a cloud backend (e.g. MQTT over TLS, or periodic HTTPS) so it works from behind a normal home router without port-forwarding or a static IP.
+* The cloud backend:
+  * Authenticates each device with a unique per-device credential (not a shared/default key).
+  * Receives telemetry (the same data shown on the local UI) and stores recent history.
+  * Accepts commands from an authenticated user session and forwards them to the device.
+  * Ties devices to user accounts via a **pairing/commissioning step** (e.g. scan a QR code on the unit, or enter its device ID + a one-time PIN, during first-time setup on the installer's phone).
+* The phone reaches the cloud backend over **any internet connection** — home Wi-Fi, other Wi-Fi, or mobile data — via a mobile-responsive web page or app. It never needs to be on the device's LAN.
+* Telemetry is pushed/polled at a low rate (e.g. every 5–10 s) plus immediately on state changes (mode switch, fault raised/cleared, heating start/stop) — this is a monitoring/UX channel, not a control loop.
+
+### Safety boundary (must not be weakened by adding this feature)
+
+* A command arriving from the cloud is a **request**, never a direct actuation. The ESP32 re-validates every remote command against the same local limits, interlocks and fault checks in Sections 5, 7, 8, 16, 17 and 24 before acting on it, exactly as it would a local web/manual command.
+* All local safety behavior (Sections 16–19: fault latching, hardware safety input, watchdog, safe power-up sequencing) must keep operating identically whether or not the cloud connection is up.
+* Loss of internet/cloud connectivity must **never** stop or degrade the local safety controls, and must **never** by itself change the heating state. The remote UI simply shows the device as "offline" / shows its last-known telemetry with a timestamp until the connection returns.
+* No feature here may require the geyser to phone home before it is allowed to heat; AUTO/MANUAL/SCHEDULE modes must continue to run correctly with only local Wi-Fi (or no Wi-Fi at all, per Section 11) available.
+
+### Security
+
+* TLS with certificate verification on the ESP32's outbound connection; no plaintext telemetry or control traffic.
+* Per-device unique keys/credentials issued at manufacture or commissioning — never a shared secret across units.
+* Remote control requires an authenticated user session tied to the paired account; no anonymous or public control endpoint.
+* Installer-only settings (Section 22) remain gated the same way remotely as they are locally.
+
+---
+
+## 14. User modes
 
 Provide:
 
@@ -323,7 +360,7 @@ The schedule must still obey all safety limits.
 
 ---
 
-## 14. Future grid mode
+## 15. Future grid mode
 
 Although simultaneous grid + inverter operation is **not Rev A4**, we want the software architecture prepared for it.
 
@@ -342,7 +379,7 @@ But this must be disabled in the Rev A4 firmware unless the hardware is specific
 
 ---
 
-## 15. Fault conditions
+## 16. Fault conditions
 
 The controller must immediately disable the heating output if any critical fault occurs.
 
@@ -364,7 +401,7 @@ Faults should be **latched where appropriate** and require acknowledgement/reset
 
 ---
 
-## 16. Hardware safety input
+## 17. Hardware safety input
 
 Provide a dedicated digital input for a hardware safety trip.
 
@@ -380,7 +417,7 @@ This must operate independently of normal software temperature control.
 
 ---
 
-## 17. Watchdog
+## 18. Watchdog
 
 Enable the ESP32 hardware/software watchdog.
 
@@ -394,7 +431,7 @@ It must not automatically resume high-power heating until the operating conditio
 
 ---
 
-## 18. Power failure
+## 19. Power failure
 
 After mains/control power is restored:
 
@@ -409,7 +446,7 @@ After mains/control power is restored:
 
 ---
 
-## 19. Data logging
+## 20. Data logging
 
 The system should record at least:
 
@@ -438,7 +475,7 @@ and provide historical data such as:
 
 ---
 
-## 20. Energy calculation
+## 21. Energy calculation
 
 The controller should calculate approximately:
 
@@ -460,7 +497,7 @@ This is important because the commercial value of the product is partly based on
 
 ---
 
-## 21. Settings the customer can change
+## 22. Settings the customer can change
 
 At minimum:
 
@@ -475,6 +512,7 @@ At minimum:
 * Manual override
 * Wi-Fi settings
 * Device name
+* Remote/cloud pairing (link/unlink the device from a user account, per Section 13)
 
 Installer-only settings should include:
 
@@ -488,7 +526,7 @@ Installer-only settings should include:
 
 ---
 
-## 22. Default settings
+## 23. Default settings
 
 Suggested initial defaults:
 
@@ -505,7 +543,7 @@ These values must be configurable but safety limits must have a hard upper bound
 
 ---
 
-## 23. Source contactor logic
+## 24. Source contactor logic
 
 Rev A4 has two possible AC sources:
 
@@ -539,7 +577,7 @@ The hardware interlock remains the primary protection.
 
 ---
 
-## 24. Output control
+## 25. Output control
 
 The ESP32 must not directly drive the SSR or contactors.
 
@@ -562,7 +600,7 @@ All outputs must have safe default states during:
 
 ---
 
-## 25. Firmware architecture
+## 26. Firmware architecture
 
 Please write the software in modular sections:
 
@@ -576,17 +614,20 @@ Please write the software in modular sections:
     temperature
     wifi
     web_interface
+    cloud_sync
     data_logging
     settings
     faults
     ota_update
 ```
 
+`cloud_sync` handles the outbound cloud connection from Section 13 (telemetry publish, remote command intake) and must stay a thin, replaceable layer that only ever calls into `power_control`/`safety` through the same validated command path the local `web_interface` uses — it must not bypass any safety check.
+
 This is important because we intend to support different inverter manufacturers later.
 
 ---
 
-## 26. OTA firmware updates
+## 27. OTA firmware updates
 
 The ESP32 should eventually support:
 
@@ -608,7 +649,7 @@ After update:
 
 ---
 
-## 27. Prototype development order
+## 28. Prototype development order
 
 Please develop the firmware in this order:
 
@@ -648,13 +689,17 @@ Battery protection.
 
 Automatic geyser control.
 
+### V0.10
+
+Cloud/remote access (Section 13) — outbound telemetry, pairing, and remote command intake re-validated through the same local safety path as the manual/web controls.
+
 ### V1.0
 
 Fault handling + data logging + complete prototype firmware.
 
 ---
 
-## 28. Most important control algorithm
+## 29. Most important control algorithm
 
 The basic algorithm should effectively be:
 
@@ -704,7 +749,7 @@ The programmer should refine the algorithm with filtering, hysteresis and ramp r
 
 ---
 
-## 29. What I expect from the programmer
+## 30. What I expect from the programmer
 
 Please provide:
 
@@ -713,16 +758,17 @@ Please provide:
 3. Pin configuration
 4. Configuration file
 5. Inverter communication module
-6. Web interface
-7. Installation instructions
-8. Programming instructions
-9. Fault-code list
-10. Calibration procedure
-11. OTA update procedure
-12. Backup/recovery firmware
-13. Git repository/source-code ownership transferred to us
-14. Documentation of all libraries used
-15. No locked or proprietary code that prevents us from modifying the firmware later.
+6. Web interface (local + remote, per Section 13)
+7. Cloud backend / pairing service required for remote access, and its hosting/ownership terms
+8. Installation instructions
+9. Programming instructions
+10. Fault-code list
+11. Calibration procedure
+12. OTA update procedure
+13. Backup/recovery firmware
+14. Git repository/source-code ownership transferred to us
+15. Documentation of all libraries and third-party/cloud services used
+16. No locked or proprietary code that prevents us from modifying the firmware later.
 
 ### Intellectual property
 
@@ -738,6 +784,6 @@ The programmer may use open-source libraries, but must provide a list of those l
 
 > First make the ESP32-S3 read the sensors and display the values on a web page. Do not connect or control the 230 V power stage until the low-voltage software has been tested.
 
-Follow the prototype development order in Section 27 — this lets the low-voltage "brain" of the product be tested and validated before any work begins on the 230 V power stage.
+Follow the prototype development order in Section 28 — this lets the low-voltage "brain" of the product be tested and validated before any work begins on the 230 V power stage.
 
 A companion **ESP32-S3 pin assignment + software I/O table** (GPIO number → exact function → input/output → active state → connector pin) should be produced alongside this specification before firmware work begins.
