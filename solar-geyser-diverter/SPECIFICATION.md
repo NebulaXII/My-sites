@@ -1,0 +1,743 @@
+# REV A4 — SMART SOLAR GEYSER DIVERTER
+
+## ESP32-S3 SOFTWARE REQUIREMENTS / PROGRAMMER BRIEF
+
+### 1. Product purpose
+
+We are developing a **3 kW smart geyser diverter** for South African residential solar installations.
+
+The unit is connected to a hybrid solar inverter and controls a conventional electric geyser element.
+
+The main purpose is to use **surplus solar PV energy during the day to heat the geyser**, while protecting the battery and ensuring the house has priority.
+
+The prototype is limited to:
+
+* **230 V AC / 50 Hz**
+* **3 kW maximum commanded geyser power**
+* **16 A absolute current protection limit**
+* ESP32-S3 controller
+* Wi-Fi
+* Temperature sensing
+* Current sensing
+* Inverter communication where available
+* Automatic and manual operating modes
+
+### 2. Important Rev A4 limitation
+
+**Grid and inverter power must NOT be paralleled.**
+
+For Rev A4, grid and inverter are treated as **two alternative sources**.
+
+The software must therefore never command the grid and inverter source contactors ON simultaneously.
+
+Future versions may add simultaneous grid + solar power combining, but this is **not part of Rev A4**.
+
+---
+
+## 3. Main operating principle
+
+The controller continuously determines:
+
+1. House electrical demand
+2. Available PV power
+3. Battery state of charge
+4. Geyser temperature
+5. Geyser current/power
+6. Whether the geyser is allowed to heat
+
+The priority should be:
+
+**House loads → battery reserve/charging requirements → surplus PV → geyser**
+
+The geyser should only receive energy that is available according to the programmed operating limits.
+
+---
+
+## 4. Automatic solar mode
+
+When the unit is in **AUTO / SOLAR mode**:
+
+### Example
+
+The inverter reports:
+
+* PV = 4.0 kW
+* House load = 1.2 kW
+* Battery = 85%
+
+There is approximately:
+
+**4.0 − 1.2 = 2.8 kW**
+
+of PV available before considering any additional inverter/battery constraints.
+
+The controller can therefore request approximately **2.8 kW maximum** for the geyser, subject to:
+
+* Maximum geyser power = 3 kW
+* Maximum current = 16 A
+* Battery reserve
+* Temperature limit
+* Inverter limits
+* Safety limits
+
+If only 800 W is available, the controller should request approximately 800 W rather than switching the full 3 kW load on.
+
+---
+
+## 5. Battery protection
+
+The user must be able to configure a **minimum battery SOC**.
+
+Example:
+
+**Battery reserve = 30%**
+
+If battery SOC is below 30%:
+
+**Geyser heating = OFF**
+
+If battery SOC is above the reserve and sufficient PV is available:
+
+**Geyser heating = permitted**
+
+There should also be hysteresis to prevent the geyser rapidly switching ON/OFF around the battery threshold.
+
+Example:
+
+* Start heating above 35%
+* Stop heating below 30%
+
+These values must be configurable.
+
+---
+
+## 6. Battery charging priority
+
+The controller must allow a configurable amount of PV power to remain available for battery charging.
+
+Example:
+
+PV = 4 kW
+House = 1 kW
+Battery charging requirement = 1 kW
+
+The geyser should only receive the remaining available power.
+
+The exact algorithm should be written so the thresholds can be changed in software later.
+
+---
+
+## 7. Geyser temperature
+
+Use the **PT1000 temperature sensor** to measure geyser temperature.
+
+User settings must include:
+
+### Target temperature
+
+Example:
+
+**60°C**
+
+### Minimum start temperature
+
+Example:
+
+**45°C**
+
+### High-temperature safety limit
+
+Example:
+
+**75°C**
+
+If temperature reaches the target:
+
+**Reduce/stop heating.**
+
+If temperature reaches the safety limit:
+
+**Immediately disable heating and generate a FAULT condition.**
+
+The software temperature limits must not replace the geyser's existing mechanical thermostat and thermal cut-out.
+
+---
+
+## 8. Geyser power control
+
+Maximum intended geyser power:
+
+**3,000 W**
+
+Maximum absolute current:
+
+**16 A**
+
+At 230 V:
+
+3,000 / 230 ≈ **13 A**
+
+Therefore 16 A is a **protection ceiling**, not the normal operating current for a 3 kW element.
+
+The software must have a hard maximum power/current limit.
+
+Example:
+
+| Available surplus | Geyser command |
+| ----------------: | -------------: |
+|               0 W |            OFF |
+|             500 W |         ~500 W |
+|              1 kW |          ~1 kW |
+|              2 kW |          ~2 kW |
+|            2.5 kW |        ~2.5 kW |
+|             ≥3 kW |   Maximum 3 kW |
+
+The actual power-control implementation must match the approved hardware power stage.
+
+---
+
+## 9. Current monitoring
+
+There will be current transformers for monitoring.
+
+At minimum:
+
+* CT1 — grid/PCC
+* CT2 — inverter/load side
+* CT3 — geyser output
+
+The software must:
+
+* Read each CT
+* Calculate RMS current
+* Detect abnormal current
+* Calculate estimated power where voltage is known
+* Display current/power to the user
+* Log measurements
+* Shut down the geyser if an over-current condition occurs.
+
+CT polarity must also be accounted for because import/export direction matters.
+
+---
+
+## 10. Inverter communication
+
+The controller should communicate with the inverter through **RS-485 where the inverter supports an appropriate protocol**.
+
+The software architecture should make the inverter protocol modular.
+
+We don't want the entire program rewritten if we change inverter brands.
+
+Create an abstract inverter interface such as:
+
+* `getPVPower()`
+* `getHouseLoad()`
+* `getBatterySOC()`
+* `getBatteryPower()`
+* `getGridPower()`
+* `getInverterStatus()`
+
+The first inverter protocol can then implement these functions.
+
+If communication is unavailable, the controller should enter a safe fallback mode rather than making assumptions about available PV.
+
+---
+
+## 11. Wi-Fi
+
+The ESP32-S3 must support Wi-Fi configuration.
+
+First boot should allow the installer to configure:
+
+* Wi-Fi SSID
+* Wi-Fi password
+* Device name
+* Installer settings
+
+The device should reconnect automatically after power failure.
+
+If Wi-Fi is unavailable:
+
+**The safety controls must continue operating locally.**
+
+Loss of Wi-Fi must **not** cause uncontrolled geyser operation.
+
+---
+
+## 12. User interface
+
+For Rev A4, a **responsive web interface hosted by the ESP32** is acceptable.
+
+The user should be able to open the controller from a phone.
+
+Main screen should display:
+
+* Geyser temperature
+* Target temperature
+* Geyser power
+* Geyser current
+* PV power
+* House load
+* Battery SOC
+* Battery reserve
+* Current operating mode
+* Source
+* Heating status
+* Fault status
+
+---
+
+## 13. User modes
+
+Provide:
+
+### AUTO SOLAR
+
+Automatically use available surplus PV.
+
+### MANUAL ON
+
+User requests heating.
+
+Still obey:
+
+* Temperature limits
+* Current limit
+* Maximum 3 kW
+* Safety trips
+* Battery protection settings where applicable.
+
+### OFF
+
+Geyser heating disabled.
+
+### SCHEDULE
+
+Allow the user to specify heating periods.
+
+Example:
+
+**12:00–17:00**
+
+The schedule must still obey all safety limits.
+
+---
+
+## 14. Future grid mode
+
+Although simultaneous grid + inverter operation is **not Rev A4**, we want the software architecture prepared for it.
+
+Future settings may include:
+
+**Maximum grid contribution:**
+
+0 W
+500 W
+1 kW
+1.5 kW
+2 kW
+etc.
+
+But this must be disabled in the Rev A4 firmware unless the hardware is specifically configured and approved for it.
+
+---
+
+## 15. Fault conditions
+
+The controller must immediately disable the heating output if any critical fault occurs.
+
+Possible faults:
+
+* Over-current
+* Over-temperature
+* Temperature sensor disconnected
+* Temperature sensor shorted
+* Invalid inverter data
+* Communication failure
+* Power measurement failure
+* Control-board fault
+* Watchdog reset
+* Unexpected relay/contactor state
+* Emergency/high-temperature input active
+
+Faults should be **latched where appropriate** and require acknowledgement/reset.
+
+---
+
+## 16. Hardware safety input
+
+Provide a dedicated digital input for a hardware safety trip.
+
+For example:
+
+**HIGH_TEMP_TRIP**
+
+If activated:
+
+**SSR OFF + source contactor OFF + FAULT**
+
+This must operate independently of normal software temperature control.
+
+---
+
+## 17. Watchdog
+
+Enable the ESP32 hardware/software watchdog.
+
+If the firmware becomes unresponsive:
+
+**Heating output must default to OFF.**
+
+After reboot, the system must start in a safe state.
+
+It must not automatically resume high-power heating until the operating conditions have been checked.
+
+---
+
+## 18. Power failure
+
+After mains/control power is restored:
+
+1. ESP32 boots.
+2. Outputs remain OFF.
+3. Sensors initialize.
+4. Inverter communication initializes.
+5. Safety inputs are checked.
+6. Temperature is checked.
+7. Battery/PV information is checked.
+8. Only then may AUTO mode restart heating.
+
+---
+
+## 19. Data logging
+
+The system should record at least:
+
+* Date/time
+* PV power
+* House load
+* Battery SOC
+* Geyser power
+* Geyser current
+* Geyser temperature
+* Operating mode
+* Faults
+* Heating start/stop
+* Energy delivered to geyser
+
+Preferably calculate:
+
+**Daily geyser energy = kWh**
+
+and provide historical data such as:
+
+* Today
+* Yesterday
+* 7 days
+* 30 days
+
+---
+
+## 20. Energy calculation
+
+The controller should calculate approximately:
+
+**Geyser energy = power × time**
+
+and accumulate this in kWh.
+
+Example:
+
+2 kW for 3 hours:
+
+**6 kWh**
+
+The app should display:
+
+> Geyser energy today: 6.0 kWh
+
+This is important because the commercial value of the product is partly based on showing the customer how much solar energy has been diverted to hot water.
+
+---
+
+## 21. Settings the customer can change
+
+At minimum:
+
+* Target temperature
+* Minimum temperature
+* Maximum temperature
+* Battery reserve
+* Maximum geyser power
+* Maximum current
+* Heating schedule
+* Operating mode
+* Manual override
+* Wi-Fi settings
+* Device name
+
+Installer-only settings should include:
+
+* CT calibration
+* Voltage calibration
+* Temperature calibration
+* Inverter protocol
+* Source selection
+* Safety thresholds
+* Firmware information.
+
+---
+
+## 22. Default settings
+
+Suggested initial defaults:
+
+**Maximum geyser power:** 3,000 W
+**Maximum current:** 16 A
+**Target temperature:** 60°C
+**High-temperature shutdown:** 75°C
+**Battery reserve:** 20–30%
+**Mode:** AUTO SOLAR
+**Grid simultaneous mode:** DISABLED
+**Manual mode:** OFF after reboot
+
+These values must be configurable but safety limits must have a hard upper boundary.
+
+---
+
+## 23. Source contactor logic
+
+Rev A4 has two possible AC sources:
+
+**GRID**
+
+and
+
+**INVERTER**
+
+They must be electrically and logically interlocked.
+
+The firmware must enforce:
+
+```text
+GRID_CONTACTOR = OFF
+before
+INVERTER_CONTACTOR = ON
+```
+
+and:
+
+```text
+INVERTER_CONTACTOR = OFF
+before
+GRID_CONTACTOR = ON
+```
+
+There must never be a software condition where both are commanded ON.
+
+The hardware interlock remains the primary protection.
+
+---
+
+## 24. Output control
+
+The ESP32 must not directly drive the SSR or contactors.
+
+Use appropriate transistor/MOSFET/isolated driver circuitry.
+
+Firmware outputs should be:
+
+* SSR_ENABLE
+* GRID_CONTACTOR
+* INVERTER_CONTACTOR
+* BUZZER
+
+All outputs must have safe default states during:
+
+* Boot
+* Reset
+* Watchdog reset
+* Firmware crash
+* Loss of communication.
+
+---
+
+## 25. Firmware architecture
+
+Please write the software in modular sections:
+
+```text
+/main
+    system
+    safety
+    sensors
+    inverter
+    power_control
+    temperature
+    wifi
+    web_interface
+    data_logging
+    settings
+    faults
+    ota_update
+```
+
+This is important because we intend to support different inverter manufacturers later.
+
+---
+
+## 26. OTA firmware updates
+
+The ESP32 should eventually support:
+
+**OTA — Over The Air firmware updates.**
+
+However, firmware updates must not be allowed to leave the power output in an unsafe state.
+
+Before updating:
+
+**Geyser OFF**
+
+During update:
+
+**Geyser OFF**
+
+After update:
+
+**Boot safe → initialize → verify → resume operation if conditions are safe.**
+
+---
+
+## 27. Prototype development order
+
+Please develop the firmware in this order:
+
+### Firmware V0.1
+
+ESP32 boot + LEDs + watchdog.
+
+### V0.2
+
+Wi-Fi + web interface.
+
+### V0.3
+
+PT1000 temperature measurement.
+
+### V0.4
+
+CT/current measurement.
+
+### V0.5
+
+Manual SSR control at low-risk test conditions.
+
+### V0.6
+
+Inverter RS-485 communication.
+
+### V0.7
+
+PV surplus algorithm.
+
+### V0.8
+
+Battery protection.
+
+### V0.9
+
+Automatic geyser control.
+
+### V1.0
+
+Fault handling + data logging + complete prototype firmware.
+
+---
+
+## 28. Most important control algorithm
+
+The basic algorithm should effectively be:
+
+```text
+Read PV
+Read house load
+Read battery SOC
+Read geyser temperature
+Read geyser current
+Read safety inputs
+
+IF safety fault:
+    GEYSER = OFF
+    SOURCE = OFF
+    FAULT = ON
+
+ELSE IF temperature >= maximum:
+    GEYSER = OFF
+    FAULT/temperature protection
+
+ELSE IF temperature >= target:
+    GEYSER = OFF
+
+ELSE IF battery SOC < minimum reserve:
+    GEYSER = OFF
+
+ELSE:
+    calculate available PV surplus
+
+    available_surplus =
+        PV power
+        - house load
+        - required battery power
+        - configured reserve
+
+    if available_surplus > minimum_start_power:
+        geyser_power =
+            MIN(available_surplus,
+                3000 W,
+                16 A limit)
+
+    else:
+        geyser = OFF
+```
+
+The programmer should refine the algorithm with filtering, hysteresis and ramp rates so that the geyser does not constantly hunt up and down when clouds pass or household loads change.
+
+---
+
+## 29. What I expect from the programmer
+
+Please provide:
+
+1. Complete ESP32-S3 source code
+2. Compiled firmware
+3. Pin configuration
+4. Configuration file
+5. Inverter communication module
+6. Web interface
+7. Installation instructions
+8. Programming instructions
+9. Fault-code list
+10. Calibration procedure
+11. OTA update procedure
+12. Backup/recovery firmware
+13. Git repository/source-code ownership transferred to us
+14. Documentation of all libraries used
+15. No locked or proprietary code that prevents us from modifying the firmware later.
+
+### Intellectual property
+
+**All source code, firmware, configuration files and custom software developed specifically for this project must belong to the product owner.**
+
+The programmer may use open-source libraries, but must provide a list of those libraries and their licenses.
+
+---
+
+## Note to the programmer
+
+**Do not start by writing the whole program.**
+
+> First make the ESP32-S3 read the sensors and display the values on a web page. Do not connect or control the 230 V power stage until the low-voltage software has been tested.
+
+Follow the prototype development order in Section 27 — this lets the low-voltage "brain" of the product be tested and validated before any work begins on the 230 V power stage.
+
+A companion **ESP32-S3 pin assignment + software I/O table** (GPIO number → exact function → input/output → active state → connector pin) should be produced alongside this specification before firmware work begins.
