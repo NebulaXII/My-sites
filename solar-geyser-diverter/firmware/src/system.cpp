@@ -16,6 +16,8 @@ namespace {
 void System::begin(){
   // Safe default state before anything else touches a GPIO — Specification §25:
   // every output must come up LOW/off, never in whatever state the pin floats to.
+  // LED_LINK is initialized here too (owned/driven from then on by WifiManager)
+  // so it never floats between boot and WifiManager::begin() running.
   pinMode(Pins::LED_HEARTBEAT, OUTPUT);
   pinMode(Pins::LED_LINK, OUTPUT);
   digitalWrite(Pins::LED_HEARTBEAT, LOW);
@@ -25,7 +27,7 @@ void System::begin(){
   Serial.begin(115200);
   delay(200); // let the USB-serial bridge settle before the first log line
   Serial.println();
-  Serial.println("[BOOT] Geyser Diverter firmware V0.1 (system/safety/faults only)");
+  Serial.println("[BOOT] Geyser Diverter firmware V0.2 (+ Wi-Fi, local web UI)");
   Serial.println("[BOOT] Outputs initialized to safe (LOW) default state");
   Serial.println("[BOOT] If GPIO7/8/9 have no LEDs wired yet, watch this log instead —");
   Serial.println("[BOOT] every heartbeat line below is the same signal the LED shows.");
