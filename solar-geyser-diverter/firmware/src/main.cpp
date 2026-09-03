@@ -5,6 +5,7 @@
 #include "web_ui.h"
 #include "temperature.h"
 #include "current_sense.h"
+#include "power_control.h"
 
 void setup(){
   System::begin();
@@ -13,6 +14,7 @@ void setup(){
   WebUI::begin();
   Temperature::begin();
   CurrentSense::begin();
+  PowerControl::begin();
 }
 
 void loop(){
@@ -21,4 +23,5 @@ void loop(){
   WebUI::loop();
   Temperature::loop();
   CurrentSense::loop();
+  PowerControl::loop();
 }

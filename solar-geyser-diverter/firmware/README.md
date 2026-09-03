@@ -1,4 +1,4 @@
-# Geyser Diverter Firmware — V0.4
+# Geyser Diverter Firmware — V0.5
 
 Staged ESP32-S3 firmware per `../SPECIFICATION.md` §28's build order. Currently
 implements:
@@ -7,13 +7,17 @@ implements:
 > **V0.2** — Wi-Fi + web interface.
 > **V0.3** — PT1000 temperature measurement.
 > **V0.4** — CT/current measurement.
+> **V0.5** — Manual SSR control at low-risk test conditions.
 
-No sensors, no power output, nothing that touches the 230V stage — that's still
-several stages out. Per the specification's own closing note, the power stage
-doesn't get wired up until each low-voltage stage before it has been bench-tested.
-
-**Do not wire this to the 230V power stage.** There is nothing in this firmware
-that drives a relay, SSR, or contactor — there's nothing to connect yet.
+**Do not wire this to the 230V power stage or the real geyser element.** V0.5
+adds the first output this firmware drives (`SSR_ENABLE`), but per the
+specification's own wording for this stage it exists for *low-risk test
+conditions only* — an LED, a small relay module, something through the same
+isolated driver you'll use in the final build, never the mains-connected
+element. There is still no automatic control logic (that's V0.9) and no
+tie-in between temperature/current readings and the output — turning it on
+is a manual, time-limited bench action, nothing more, and it's built to
+enforce that itself rather than rely on you remembering to.
 
 ## What it does
 
@@ -98,6 +102,24 @@ place to change if your board's wiring differs.
 Check these constants against your actual hardware before relying on any
 number this firmware reports.
 
+**V0.5 (manual SSR test control), added this stage:**
+- `power_control.h/.cpp` — drives `SSR_ENABLE` (GPIO21) through whatever
+  isolated driver circuitry sits between the pin and the actual SSR
+  (Specification §25 — this firmware never switches the SSR/contactor
+  directly). Safety properties enforced in the module itself, not left to
+  the caller:
+  - Defaults off on boot/reset, same as every other output.
+  - `requestOn()` refuses (returns `false`, stays off) while any fault is
+    active — pulls directly from the same `Faults::active()` the temperature
+    and current-sensing stages already feed.
+  - If a fault appears *while* it's on, it force-turns-off within one main
+    loop iteration.
+  - Auto-turns-off after a fixed 10-second bench-test timeout regardless of
+    anything else, so a forgotten "on" can't stay energized.
+- `/power` — a dedicated page with the low-risk-load warning up front, current
+  state, and "Turn ON (10s test)" / "Turn OFF now" buttons. Linked from `/`.
+  `/api/status` gained `ssr_on` and `ssr_seconds_remaining`.
+
 ## Build and flash
 
 Requires [PlatformIO](https://platformio.org/) (`pip install platformio`, or the
@@ -138,7 +160,7 @@ Wi-Fi" button on the `/wifi` page (or wipe flash / erase NVS).
 would show:
 
 ```
-[BOOT] Geyser Diverter firmware V0.4 (+ CT current/voltage sensing)
+[BOOT] Geyser Diverter firmware V0.5 (+ manual SSR test control)
 [BOOT] Outputs initialized to safe (LOW) default state
 [BOOT] Watchdog armed: 5s timeout
 [WIFI] No/failed credentials -> AP mode. SSID 'GeyserDiverter-3A1F', http://192.168.4.1/
@@ -201,6 +223,26 @@ fires correctly rather than trusting the code:
 2. Confirm `/` and the serial log show a FAULT with reason `over-current`,
    and that it clears once the current drops back under the limit.
 
+## Testing the manual SSR output
+
+With a low-risk test load wired through the isolated driver to `SSR_ENABLE`
+(GPIO21) — **not** the mains-connected geyser element:
+
+1. Browse to `/power`, click "Turn ON (10s test)". Confirm the load actually
+   energizes, and that the page/`/api/status` shows the countdown.
+2. Let it run out — confirm it turns off on its own at 0s, without you
+   clicking anything.
+3. Turn it on again, then trigger a fault (e.g. unplug the PT1000, or hold
+   the watchdog test button per below) — confirm it force-turns-off
+   immediately rather than waiting out the 10s.
+4. With a fault active, try "Turn ON" — confirm it's refused (the page
+   should say so) and the output stays off.
+
+If any of these three don't hold on your actual hardware, don't move on to
+V0.6 until they do — this is the one stage where "the code looks right" isn't
+good enough, since it's the first thing standing between firmware and
+whatever's actually wired to the SSR.
+
 ## Testing the watchdog
 
 Still the one V0.1 behavior worth proving on the bench, not just trusting:
@@ -226,15 +268,17 @@ Still the one V0.1 behavior worth proving on the bench, not just trusting:
 
 ## Not built yet
 
-Everything else in the staged plan (Specification §28): manual SSR control
-(V0.5), inverter RS-485 (V0.6), the surplus-solar algorithm (V0.7) — which is
-also where CT polarity/import-export direction lands, see above — battery
-protection (V0.8), automatic control (V0.9), cloud pairing (V0.10), then full
-fault handling + data logging (V1.0), including the latched,
+Everything else in the staged plan (Specification §28): inverter RS-485
+(V0.6), the surplus-solar algorithm (V0.7) — which is also where CT
+polarity/import-export direction lands, see above — battery protection
+(V0.8), automatic control (V0.9), cloud pairing (V0.10), then full fault
+handling + data logging (V1.0), including the latched,
 acknowledgement-required fault behavior Specification §16 actually asks for;
 every fault source built so far auto-clears once its condition goes away,
 which is a deliberate simplification until V1.0, not the final behavior.
-Each stage gets the same treatment this one did: build it, bench-test it on
-real hardware, confirm it fails safe, *then* move to the next stage — never
-all at once, and never near mains power until the stage that actually needs it
-says so.
+V0.5's SSR control is manual and time-limited only — there is still no
+connection at all between temperature/current readings and the output; that
+tie-in doesn't arrive until V0.9. Each stage gets the same treatment this one
+did: build it, bench-test it on real hardware, confirm it fails safe, *then*
+move to the next stage — never all at once, and never near mains power until
+the stage that actually needs it says so.

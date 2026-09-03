@@ -4,6 +4,7 @@
 #include "faults.h"
 #include "temperature.h"
 #include "current_sense.h"
+#include "power_control.h"
 #include <WebServer.h>
 
 namespace {
@@ -46,10 +47,12 @@ namespace {
             "padding:10px 16px;border-radius:8px;border:0;font-size:.9rem;cursor:pointer;margin-top:6px}"
             "form{margin-top:8px}label{display:block;font-size:.8rem;color:#55655c;margin:14px 0 4px}"
             "input{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:7px;border:1px solid #d8dfd4;font-size:.95rem}"
-            "footer{margin-top:28px;color:#8b9a8f;font-size:.75rem}";
+            "footer{margin-top:28px;color:#8b9a8f;font-size:.75rem}"
+            ".warn{background:#fbe9e5;border:1px solid #e8b3a6;border-radius:8px;padding:12px 14px;font-size:.85rem;margin-bottom:20px}"
+            "button.danger{background:#d03b3b}button.off{background:#55655c}";
     html += "</style></head><body>";
     html += body;
-    html += "<footer>Rev A4 Geyser Diverter &mdash; firmware V0.4</footer>";
+    html += "<footer>Rev A4 Geyser Diverter &mdash; firmware V0.5</footer>";
     html += "</body></html>";
     return html;
   }
@@ -80,8 +83,11 @@ namespace {
     } else {
       body += "<tr><td class='k'>Current/voltage sensing</td><td class='v'>no reading yet</td></tr>";
     }
+    body += "<tr><td class='k'>SSR (manual test)</td><td class='v'>" +
+      (PowerControl::isOn() ? "ON, " + String(PowerControl::secondsRemaining()) + "s left" : String("off")) + "</td></tr>";
     body += "</table>";
-    body += "<a class='btn' href='/wifi'>Wi-Fi &amp; device settings</a>";
+    body += "<a class='btn' href='/wifi'>Wi-Fi &amp; device settings</a> ";
+    body += "<a class='btn' href='/power' style='background:#d03b3b'>Manual SSR test</a>";
     httpServer.send(200, "text/html", pageShell(Settings::deviceName(), body));
   }
 
@@ -136,10 +142,43 @@ namespace {
     restartAtMs = millis() + 1000; // let the response flush before rebooting
   }
 
+  String powerBody(const String &note){
+    String body = "<h1>Manual SSR test</h1>";
+    body += "<div class='warn'><strong>Bench test only.</strong> Confirm this drives a low-risk test "
+            "load (an LED, a small relay module, anything through the same isolated driver you'll use "
+            "in the final design) &mdash; never the mains-connected geyser element at this stage "
+            "(Specification &sect;28 V0.5). Turns off on its own after 10 seconds, and refuses to turn "
+            "on at all while any fault is active.</div>";
+    if (note.length()) body += "<p class='tag'>" + note + "</p>";
+    body += "<table><tr><td class='k'>SSR_ENABLE</td><td class='v'>" +
+      (PowerControl::isOn() ? "ON &mdash; " + String(PowerControl::secondsRemaining()) + "s left" : String("off")) +
+      "</td></tr>";
+    body += "<tr><td class='k'>Fault status</td><td class='v'>" + String(Faults::active() ? "FAULT" : "OK") + "</td></tr></table>";
+    body += "<form method='POST' action='/power/on' style='display:inline'><button>Turn ON (10s test)</button></form> ";
+    body += "<form method='POST' action='/power/off' style='display:inline'><button class='off' type='submit'>Turn OFF now</button></form>";
+    body += "<p><a href='/'>&larr; back</a></p>";
+    return body;
+  }
+
+  void handlePowerPage(){
+    httpServer.send(200, "text/html", pageShell("Manual SSR test", powerBody("")));
+  }
+
+  void handlePowerOn(){
+    bool ok = PowerControl::requestOn();
+    String note = ok ? "Turned on." : "Refused: a fault is currently active.";
+    httpServer.send(200, "text/html", pageShell("Manual SSR test", powerBody(note)));
+  }
+
+  void handlePowerOff(){
+    PowerControl::requestOff();
+    httpServer.send(200, "text/html", pageShell("Manual SSR test", powerBody("Turned off.")));
+  }
+
   void handleApiStatus(){
     String json = "{";
     json += "\"device_name\":\"" + Settings::deviceName() + "\",";
-    json += "\"firmware_stage\":\"V0.4\",";
+    json += "\"firmware_stage\":\"V0.5\",";
     json += "\"wifi_status\":\"" + WifiManager::statusText() + "\",";
     json += "\"ip\":\"" + WifiManager::ipAddress() + "\",";
     json += "\"uptime_s\":" + String(millis() / 1000) + ",";
@@ -151,7 +190,9 @@ namespace {
     json += "\"inverter_a\":" + (CurrentSense::hasReading() ? String(CurrentSense::inverterAmps(), 3) : String("null")) + ",";
     json += "\"geyser_a\":" + (CurrentSense::hasReading() ? String(CurrentSense::geyserAmps(), 3) : String("null")) + ",";
     json += "\"mains_v\":" + (CurrentSense::hasReading() ? String(CurrentSense::mainsVolts(), 1) : String("null")) + ",";
-    json += "\"geyser_power_est_w\":" + (CurrentSense::hasReading() ? String(CurrentSense::geyserPowerEstimateW(), 1) : String("null"));
+    json += "\"geyser_power_est_w\":" + (CurrentSense::hasReading() ? String(CurrentSense::geyserPowerEstimateW(), 1) : String("null")) + ",";
+    json += "\"ssr_on\":" + String(PowerControl::isOn() ? "true" : "false") + ",";
+    json += "\"ssr_seconds_remaining\":" + String(PowerControl::secondsRemaining());
     json += "}";
     httpServer.send(200, "application/json", json);
   }
@@ -166,6 +207,9 @@ void WebUI::begin(){
   httpServer.on("/wifi", HTTP_GET, handleWifiForm);
   httpServer.on("/wifi/save", HTTP_POST, handleWifiSave);
   httpServer.on("/wifi/reset", HTTP_POST, handleWifiReset);
+  httpServer.on("/power", HTTP_GET, handlePowerPage);
+  httpServer.on("/power/on", HTTP_POST, handlePowerOn);
+  httpServer.on("/power/off", HTTP_POST, handlePowerOff);
   httpServer.on("/api/status", HTTP_GET, handleApiStatus);
   httpServer.onNotFound(handleNotFound);
   httpServer.begin();

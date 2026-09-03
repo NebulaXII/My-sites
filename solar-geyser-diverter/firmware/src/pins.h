@@ -24,4 +24,9 @@ namespace Pins {
   constexpr int CT2_INVERTER_SENSE = 2;  // inverter/load side
   constexpr int CT3_GEYSER_SENSE   = 4;  // geyser output — feeds the 16A hard limit (§8)
   constexpr int AC_VOLTAGE_SENSE   = 5;  // mains voltage reference
+
+  // §5: Output control, added V0.5. Driven through isolated driver circuitry
+  // per Specification §25 — the ESP32 never switches the SSR/contactor
+  // directly, whatever is wired to this pin is the driver's input only.
+  constexpr int SSR_ENABLE = 21;
 }
