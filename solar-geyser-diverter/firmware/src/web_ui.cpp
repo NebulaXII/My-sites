@@ -3,6 +3,7 @@
 #include "settings.h"
 #include "faults.h"
 #include "temperature.h"
+#include "current_sense.h"
 #include <WebServer.h>
 
 namespace {
@@ -48,7 +49,7 @@ namespace {
             "footer{margin-top:28px;color:#8b9a8f;font-size:.75rem}";
     html += "</style></head><body>";
     html += body;
-    html += "<footer>Rev A4 Geyser Diverter &mdash; firmware V0.3</footer>";
+    html += "<footer>Rev A4 Geyser Diverter &mdash; firmware V0.4</footer>";
     html += "</body></html>";
     return html;
   }
@@ -70,7 +71,15 @@ namespace {
       body += "<tr><td class='k'>Geyser temperature</td><td class='v'>" +
         String(Temperature::sensorFaulted() ? "sensor fault" : "no reading yet") + "</td></tr>";
     }
-    body += "<tr><td class='k'>Current/voltage sensing</td><td class='v'>not yet installed (V0.4+)</td></tr>";
+    if (CurrentSense::hasReading()){
+      body += "<tr><td class='k'>Mains voltage</td><td class='v'>" + String(CurrentSense::mainsVolts(), 0) + "V</td></tr>";
+      body += "<tr><td class='k'>Grid current</td><td class='v'>" + String(CurrentSense::gridAmps(), 2) + "A</td></tr>";
+      body += "<tr><td class='k'>Inverter current</td><td class='v'>" + String(CurrentSense::inverterAmps(), 2) + "A</td></tr>";
+      body += "<tr><td class='k'>Geyser current</td><td class='v'>" + String(CurrentSense::geyserAmps(), 2) + "A</td></tr>";
+      body += "<tr><td class='k'>Geyser power (est.)</td><td class='v'>" + String(CurrentSense::geyserPowerEstimateW(), 0) + "W</td></tr>";
+    } else {
+      body += "<tr><td class='k'>Current/voltage sensing</td><td class='v'>no reading yet</td></tr>";
+    }
     body += "</table>";
     body += "<a class='btn' href='/wifi'>Wi-Fi &amp; device settings</a>";
     httpServer.send(200, "text/html", pageShell(Settings::deviceName(), body));
@@ -130,14 +139,19 @@ namespace {
   void handleApiStatus(){
     String json = "{";
     json += "\"device_name\":\"" + Settings::deviceName() + "\",";
-    json += "\"firmware_stage\":\"V0.3\",";
+    json += "\"firmware_stage\":\"V0.4\",";
     json += "\"wifi_status\":\"" + WifiManager::statusText() + "\",";
     json += "\"ip\":\"" + WifiManager::ipAddress() + "\",";
     json += "\"uptime_s\":" + String(millis() / 1000) + ",";
     json += "\"fault_active\":" + String(Faults::active() ? "true" : "false") + ",";
     json += "\"temperature_c\":" + (Temperature::hasReading() ? String(Temperature::celsius(), 2) : String("null")) + ",";
     json += "\"temperature_installed\":true,";
-    json += "\"current_voltage_installed\":false";
+    json += "\"current_voltage_installed\":" + String(CurrentSense::hasReading() ? "true" : "false") + ",";
+    json += "\"grid_a\":" + (CurrentSense::hasReading() ? String(CurrentSense::gridAmps(), 3) : String("null")) + ",";
+    json += "\"inverter_a\":" + (CurrentSense::hasReading() ? String(CurrentSense::inverterAmps(), 3) : String("null")) + ",";
+    json += "\"geyser_a\":" + (CurrentSense::hasReading() ? String(CurrentSense::geyserAmps(), 3) : String("null")) + ",";
+    json += "\"mains_v\":" + (CurrentSense::hasReading() ? String(CurrentSense::mainsVolts(), 1) : String("null")) + ",";
+    json += "\"geyser_power_est_w\":" + (CurrentSense::hasReading() ? String(CurrentSense::geyserPowerEstimateW(), 1) : String("null"));
     json += "}";
     httpServer.send(200, "application/json", json);
   }

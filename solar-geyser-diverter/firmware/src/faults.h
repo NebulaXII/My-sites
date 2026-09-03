@@ -14,6 +14,7 @@ namespace Faults {
   enum class Source {
     WATCHDOG_TEST,  // V0.1 self-test only
     SENSOR_TEMP,    // V0.3: MAX31865 fault flag or an implausible reading
+    OVER_CURRENT,   // V0.4: geyser-leg CT exceeded the §8 16A hard limit
     COUNT
   };
 

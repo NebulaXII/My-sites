@@ -9,6 +9,7 @@ namespace {
     switch (s){
       case Faults::Source::WATCHDOG_TEST: return "watchdog-test";
       case Faults::Source::SENSOR_TEMP:   return "sensor-temp";
+      case Faults::Source::OVER_CURRENT:  return "over-current";
       default: return "unknown";
     }
   }

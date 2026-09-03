@@ -1,4 +1,4 @@
-# Geyser Diverter Firmware — V0.3
+# Geyser Diverter Firmware — V0.4
 
 Staged ESP32-S3 firmware per `../SPECIFICATION.md` §28's build order. Currently
 implements:
@@ -6,6 +6,7 @@ implements:
 > **V0.1** — ESP32 boot + LEDs + watchdog.
 > **V0.2** — Wi-Fi + web interface.
 > **V0.3** — PT1000 temperature measurement.
+> **V0.4** — CT/current measurement.
 
 No sensors, no power output, nothing that touches the 230V stage — that's still
 several stages out. Per the specification's own closing note, the power stage
@@ -55,14 +56,47 @@ that drives a relay, SSR, or contactor — there's nothing to connect yet.
 - The `/` status page and `/api/status` now show a real temperature reading
   instead of a placeholder.
 
+**V0.4 (CT current + mains voltage sensing), added this stage:**
+- `current_sense.h/.cpp` — reads CT1 (grid/PCC), CT2 (inverter/load), CT3
+  (geyser output), and the mains voltage reference (Specification §9), each
+  as a true-RMS burst of 640 samples once a second. Raises
+  `Faults::Source::OVER_CURRENT` if the geyser leg exceeds the 16A hard
+  ceiling (Specification §8).
+- The `/` status page and `/api/status` now show real current/voltage/power
+  numbers instead of the "not yet installed" placeholder.
+
+**Not implemented in V0.4 — CT polarity / import-export direction.**
+Specification §9 explicitly asks for this, but every reading here is an
+*unsigned* RMS magnitude. Telling import from export needs the sign of real
+power, which needs synchronized voltage+current sampling and a phase
+comparison — meaningfully more work than per-channel RMS. It's deferred to
+whichever stage actually needs it first, most likely V0.7 (surplus-solar
+algorithm), rather than half-built here. Don't read directionality into
+these numbers; they're magnitude only.
+
+**Power estimate is geyser-leg-only, and why:** `geyserPowerEstimateW()`
+computes `V_rms * I_rms`, which is only valid because the geyser element is
+a resistive load (power factor ≈ 1). Do not reuse that formula for the
+grid/inverter legs — a real inverter or grid connection can be reactive, and
+this simplified math doesn't account for phase angle. True real-power
+measurement needs synchronized sampling, not built yet.
+
 Pin numbers come from `../PIN_ASSIGNMENT.md` §8 via `src/pins.h` — the single
 place to change if your board's wiring differs.
 
-**Confirm before trusting a reading:** `temperature.cpp` assumes PT1000 with a
-4300Ω reference resistor and 3-wire RTD wiring — the standard pairing, but
-*your* MAX31865 breakout/PCB may differ (2-wire, 4-wire, a different Rref).
-Check the constants at the top of that file against your actual hardware
-before relying on the numbers it reports.
+**Confirm before trusting a reading:**
+- `temperature.cpp` assumes PT1000 with a 4300Ω reference resistor and
+  3-wire RTD wiring — the standard pairing, but *your* MAX31865 breakout/PCB
+  may differ (2-wire, 4-wire, a different Rref).
+- `current_sense.cpp`'s `CT_AMPS_PER_VOLT` and `MAINS_VOLTS_PER_VOLT` are
+  **placeholders, not calibrated values** — they depend entirely on your
+  CT's turns ratio, burden resistor, and voltage-sense front end, none of
+  which I have real numbers for. Every current/voltage/power reading from
+  this stage is meaningless until these are measured against a known load
+  and corrected — see "Calibrating the CT/voltage readings" below.
+
+Check these constants against your actual hardware before relying on any
+number this firmware reports.
 
 ## Build and flash
 
@@ -104,12 +138,13 @@ Wi-Fi" button on the `/wifi` page (or wipe flash / erase NVS).
 would show:
 
 ```
-[BOOT] Geyser Diverter firmware V0.3 (+ PT1000 temperature)
+[BOOT] Geyser Diverter firmware V0.4 (+ CT current/voltage sensing)
 [BOOT] Outputs initialized to safe (LOW) default state
 [BOOT] Watchdog armed: 5s timeout
 [WIFI] No/failed credentials -> AP mode. SSID 'GeyserDiverter-3A1F', http://192.168.4.1/
 [WEBUI] Local web server started on port 80
 [TEMP] MAX31865 initialized (PT1000, assumed 3-wire — confirm on hardware)
+[CURRENT] CT/voltage sensing initialized — calibration constants are PLACEHOLDERS, see README
 [HEARTBEAT] alive, uptime=0s, fault=no
 ...
 ```
@@ -131,6 +166,40 @@ trusting the code compiled:
    logged (`[FAULT] sensor-temp: ...`), and back to OK once reconnected —
    this is the behavior Specification §16 actually cares about, not just a
    plausible-looking number when everything's working.
+
+## Calibrating the CT/voltage readings
+
+The default constants in `current_sense.cpp` are not measurements of your
+hardware — they're placeholders so the code has something to compile against.
+Before trusting any current/voltage/power number this firmware reports:
+
+1. Connect a known load (a resistive heater or lamp of known wattage is
+   easiest) through each CT you're calibrating, and a multimeter or a
+   reference meter on the same circuit if you have one.
+2. Read the raw, uncalibrated value the firmware reports (`/api/status`) for
+   that channel against the known-good reference.
+3. `CT_AMPS_PER_VOLT` and `MAINS_VOLTS_PER_VOLT` are linear scale factors —
+   `real_amps = adc_rms_volts * CT_AMPS_PER_VOLT`. Solve for the constant
+   using your known load and update it.
+4. Repeat across a couple of different load levels if you can — a single
+   calibration point won't catch a burden resistor or CT ratio that's
+   nonlinear or off by a fixed offset rather than a scale factor.
+
+This is a manual, one-constant-per-channel calibration for now. A proper
+installer-facing calibration procedure/UI (Specification §21/§30) is a later
+deliverable, not this stage's job.
+
+## Verifying the over-current fault
+
+There's nothing driving power yet, so this only tests the *detection* path,
+not an actual shutdown — but it's still worth confirming the threshold logic
+fires correctly rather than trusting the code:
+
+1. With CT3 (geyser leg) calibrated, drive it above 16A (careful — this
+   means an actual real load at that current, so only do this if you have a
+   safe way to source it).
+2. Confirm `/` and the serial log show a FAULT with reason `over-current`,
+   and that it clears once the current drops back under the limit.
 
 ## Testing the watchdog
 
@@ -157,13 +226,14 @@ Still the one V0.1 behavior worth proving on the bench, not just trusting:
 
 ## Not built yet
 
-Everything else in the staged plan (Specification §28): CT current sensing
-(V0.4), manual SSR control (V0.5), inverter RS-485 (V0.6), the surplus-solar
-algorithm (V0.7), battery protection (V0.8), automatic control (V0.9), cloud
-pairing (V0.10), then full fault handling + data logging (V1.0) — including
-the latched, acknowledgement-required fault behavior Specification §16
-actually asks for; V0.3's fault handling auto-clears once the condition goes
-away, which is a deliberate simplification until V1.0, not the final behavior.
+Everything else in the staged plan (Specification §28): manual SSR control
+(V0.5), inverter RS-485 (V0.6), the surplus-solar algorithm (V0.7) — which is
+also where CT polarity/import-export direction lands, see above — battery
+protection (V0.8), automatic control (V0.9), cloud pairing (V0.10), then full
+fault handling + data logging (V1.0), including the latched,
+acknowledgement-required fault behavior Specification §16 actually asks for;
+every fault source built so far auto-clears once its condition goes away,
+which is a deliberate simplification until V1.0, not the final behavior.
 Each stage gets the same treatment this one did: build it, bench-test it on
 real hardware, confirm it fails safe, *then* move to the next stage — never
 all at once, and never near mains power until the stage that actually needs it

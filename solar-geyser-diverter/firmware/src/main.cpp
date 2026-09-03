@@ -4,6 +4,7 @@
 #include "wifi_manager.h"
 #include "web_ui.h"
 #include "temperature.h"
+#include "current_sense.h"
 
 void setup(){
   System::begin();
@@ -11,6 +12,7 @@ void setup(){
   WifiManager::begin();
   WebUI::begin();
   Temperature::begin();
+  CurrentSense::begin();
 }
 
 void loop(){
@@ -18,4 +20,5 @@ void loop(){
   WifiManager::loop();
   WebUI::loop();
   Temperature::loop();
+  CurrentSense::loop();
 }

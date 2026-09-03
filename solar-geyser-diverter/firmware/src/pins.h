@@ -16,4 +16,12 @@ namespace Pins {
   constexpr int TEMP_SPI_MISO = 13;
   constexpr int TEMP_SPI_CS   = 14;
   constexpr int TEMP_DRDY     = 15;  // not used yet — this stage polls instead of using the interrupt
+
+  // §2: CT + mains voltage sensing, added V0.4 — ADC1 only (GPIO1-10).
+  // ADC2 shares hardware with the Wi-Fi radio and must never be used for a
+  // reading anything depends on while Wi-Fi is active (Specification §2).
+  constexpr int CT1_GRID_SENSE     = 1;  // grid/PCC
+  constexpr int CT2_INVERTER_SENSE = 2;  // inverter/load side
+  constexpr int CT3_GEYSER_SENSE   = 4;  // geyser output — feeds the 16A hard limit (§8)
+  constexpr int AC_VOLTAGE_SENSE   = 5;  // mains voltage reference
 }
