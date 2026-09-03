@@ -29,4 +29,9 @@ namespace Pins {
   // per Specification §25 — the ESP32 never switches the SSR/contactor
   // directly, whatever is wired to this pin is the driver's input only.
   constexpr int SSR_ENABLE = 21;
+
+  // §4: Inverter RS-485, added V0.6.
+  constexpr int RS485_TX    = 17;
+  constexpr int RS485_RX    = 18;
+  constexpr int RS485_DE_RE = 16;  // active high = transmit
 }

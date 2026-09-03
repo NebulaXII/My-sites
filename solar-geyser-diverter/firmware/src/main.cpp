@@ -6,6 +6,7 @@
 #include "temperature.h"
 #include "current_sense.h"
 #include "power_control.h"
+#include "inverter_link.h"
 
 void setup(){
   System::begin();
@@ -15,6 +16,7 @@ void setup(){
   Temperature::begin();
   CurrentSense::begin();
   PowerControl::begin();
+  InverterLink::begin();
 }
 
 void loop(){
@@ -24,4 +26,5 @@ void loop(){
   Temperature::loop();
   CurrentSense::loop();
   PowerControl::loop();
+  InverterLink::loop();
 }

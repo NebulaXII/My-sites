@@ -5,6 +5,8 @@
 #include "temperature.h"
 #include "current_sense.h"
 #include "power_control.h"
+#include "inverter_link.h"
+#include "rs485_bus.h"
 #include <WebServer.h>
 
 namespace {
@@ -52,7 +54,7 @@ namespace {
             "button.danger{background:#d03b3b}button.off{background:#55655c}";
     html += "</style></head><body>";
     html += body;
-    html += "<footer>Rev A4 Geyser Diverter &mdash; firmware V0.5</footer>";
+    html += "<footer>Rev A4 Geyser Diverter &mdash; firmware V0.6</footer>";
     html += "</body></html>";
     return html;
   }
@@ -85,9 +87,11 @@ namespace {
     }
     body += "<tr><td class='k'>SSR (manual test)</td><td class='v'>" +
       (PowerControl::isOn() ? "ON, " + String(PowerControl::secondsRemaining()) + "s left" : String("off")) + "</td></tr>";
+    body += "<tr><td class='k'>Inverter link</td><td class='v'>" + String(InverterLink::inverter().getInverterStatus()) + "</td></tr>";
     body += "</table>";
     body += "<a class='btn' href='/wifi'>Wi-Fi &amp; device settings</a> ";
-    body += "<a class='btn' href='/power' style='background:#d03b3b'>Manual SSR test</a>";
+    body += "<a class='btn' href='/power' style='background:#d03b3b'>Manual SSR test</a> ";
+    body += "<a class='btn' href='/inverter'>Inverter link</a>";
     httpServer.send(200, "text/html", pageShell(Settings::deviceName(), body));
   }
 
@@ -175,10 +179,38 @@ namespace {
     httpServer.send(200, "text/html", pageShell("Manual SSR test", powerBody("Turned off.")));
   }
 
+  String inverterBody(const String &note){
+    const InverterInterface &inv = InverterLink::inverter();
+    String body = "<h1>Inverter link</h1>";
+    body += "<p class='tag'>Specification &sect;10</p>";
+    body += "<table>";
+    body += "<tr><td class='k'>Status</td><td class='v'>" + String(inv.getInverterStatus()) + "</td></tr>";
+    body += "<tr><td class='k'>Online</td><td class='v'>" + String(inv.isOnline() ? "yes" : "no") + "</td></tr>";
+    body += "</table>";
+    body += "<div class='warn'>No real inverter protocol is implemented yet &mdash; different inverter "
+            "brands use incompatible RS-485 register maps, so this stage only proves the transport "
+            "(UART + DE/RE turnaround) works, not communication with any actual inverter. To bench-test "
+            "it, jumper GPIO17 (TX) directly to GPIO18 (RX) &mdash; or loop the transceiver's A/B lines "
+            "back to themselves &mdash; then run the test below.</div>";
+    if (note.length()) body += "<p class='tag'>" + note + "</p>";
+    body += "<form method='POST' action='/inverter/loopback'><button>Run RS-485 loopback test</button></form>";
+    body += "<p><a href='/'>&larr; back</a></p>";
+    return body;
+  }
+
+  void handleInverterPage(){
+    httpServer.send(200, "text/html", pageShell("Inverter link", inverterBody("")));
+  }
+
+  void handleInverterLoopback(){
+    String result = RS485Bus::runLoopbackTest();
+    httpServer.send(200, "text/html", pageShell("Inverter link", inverterBody(result)));
+  }
+
   void handleApiStatus(){
     String json = "{";
     json += "\"device_name\":\"" + Settings::deviceName() + "\",";
-    json += "\"firmware_stage\":\"V0.5\",";
+    json += "\"firmware_stage\":\"V0.6\",";
     json += "\"wifi_status\":\"" + WifiManager::statusText() + "\",";
     json += "\"ip\":\"" + WifiManager::ipAddress() + "\",";
     json += "\"uptime_s\":" + String(millis() / 1000) + ",";
@@ -192,7 +224,9 @@ namespace {
     json += "\"mains_v\":" + (CurrentSense::hasReading() ? String(CurrentSense::mainsVolts(), 1) : String("null")) + ",";
     json += "\"geyser_power_est_w\":" + (CurrentSense::hasReading() ? String(CurrentSense::geyserPowerEstimateW(), 1) : String("null")) + ",";
     json += "\"ssr_on\":" + String(PowerControl::isOn() ? "true" : "false") + ",";
-    json += "\"ssr_seconds_remaining\":" + String(PowerControl::secondsRemaining());
+    json += "\"ssr_seconds_remaining\":" + String(PowerControl::secondsRemaining()) + ",";
+    json += "\"inverter_online\":" + String(InverterLink::inverter().isOnline() ? "true" : "false") + ",";
+    json += "\"inverter_status\":\"" + String(InverterLink::inverter().getInverterStatus()) + "\"";
     json += "}";
     httpServer.send(200, "application/json", json);
   }
@@ -210,6 +244,8 @@ void WebUI::begin(){
   httpServer.on("/power", HTTP_GET, handlePowerPage);
   httpServer.on("/power/on", HTTP_POST, handlePowerOn);
   httpServer.on("/power/off", HTTP_POST, handlePowerOff);
+  httpServer.on("/inverter", HTTP_GET, handleInverterPage);
+  httpServer.on("/inverter/loopback", HTTP_POST, handleInverterLoopback);
   httpServer.on("/api/status", HTTP_GET, handleApiStatus);
   httpServer.onNotFound(handleNotFound);
   httpServer.begin();

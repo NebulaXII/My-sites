@@ -1,4 +1,4 @@
-# Geyser Diverter Firmware — V0.5
+# Geyser Diverter Firmware — V0.6
 
 Staged ESP32-S3 firmware per `../SPECIFICATION.md` §28's build order. Currently
 implements:
@@ -8,6 +8,7 @@ implements:
 > **V0.3** — PT1000 temperature measurement.
 > **V0.4** — CT/current measurement.
 > **V0.5** — Manual SSR control at low-risk test conditions.
+> **V0.6** — Inverter RS-485 communication (transport only — see below).
 
 **Do not wire this to the 230V power stage or the real geyser element.** V0.5
 adds the first output this firmware drives (`SSR_ENABLE`), but per the
@@ -120,6 +121,44 @@ number this firmware reports.
   state, and "Turn ON (10s test)" / "Turn OFF now" buttons. Linked from `/`.
   `/api/status` gained `ssr_on` and `ssr_seconds_remaining`.
 
+**V0.6 (inverter RS-485) — transport layer only, no protocol implemented yet.**
+Different inverter brands (Sunsynk, Deye, Victron, Growatt, SolarEdge, ...)
+use incompatible RS-485 register maps and, in some cases, entirely different
+protocols. Building a concrete driver means picking one and getting its
+register map right — guessing would mean shipping code that could send
+genuinely wrong commands to real hardware, which is worse than not building
+it. So this stage builds everything that's protocol-agnostic and defers the
+protocol-specific part until it's known which inverter this targets:
+
+- `inverter.h` — the abstract `InverterInterface` Specification §10 asks for
+  by name (`getPVPower()`, `getHouseLoad()`, `getBatterySOC()`,
+  `getBatteryPower()`, `getGridPower()`, `getInverterStatus()`). A real
+  protocol becomes a new subclass of this — nothing downstream changes.
+- `null_inverter.h` — a stand-in implementation: always offline, always
+  reports "no protocol configured". This is what's active right now, so
+  every caller downstream is already exercising the "no inverter data" path
+  Specification §10 explicitly requires ("safe fallback mode rather than
+  making assumptions about available PV") against real, if empty, plumbing.
+- `rs485_bus.h/.cpp` — the actual hardware transport: UART1 remapped onto
+  GPIO16/17/18, handling the half-duplex DE/RE turnaround correctly (waits
+  for the UART to *physically* finish transmitting, not just for the buffer
+  to accept the bytes, before switching back to receive — get this wrong and
+  the last byte of every message gets corrupted). This part is real and
+  protocol-agnostic regardless of which inverter ends up on the other end.
+- `inverter_link.h/.cpp` — owns the active `InverterInterface*` and polls it
+  every 2s, following the same module pattern as temperature/current sensing.
+- `/inverter` page — shows link status and a **loopback test** you can
+  actually run on the bench today, without any real inverter: jumper TX
+  (GPIO17) to RX (GPIO18) and it sends a known pattern and confirms it reads
+  back correctly. This proves the transport layer works independent of
+  whatever protocol eventually sits on top of it.
+
+**Once you know the target inverter**, its protocol becomes a new class
+implementing `InverterInterface` (e.g. `SunsynkModbusInverter`), built on top
+of `rs485_bus.h`'s `write()`/`available()`/`read()`, and `inverter_link.cpp`
+points `active` at it instead of `NullInverter`. Nothing else in this
+codebase needs to change.
+
 ## Build and flash
 
 Requires [PlatformIO](https://platformio.org/) (`pip install platformio`, or the
@@ -160,13 +199,14 @@ Wi-Fi" button on the `/wifi` page (or wipe flash / erase NVS).
 would show:
 
 ```
-[BOOT] Geyser Diverter firmware V0.5 (+ manual SSR test control)
+[BOOT] Geyser Diverter firmware V0.6 (+ RS-485 transport, no inverter protocol yet)
 [BOOT] Outputs initialized to safe (LOW) default state
 [BOOT] Watchdog armed: 5s timeout
 [WIFI] No/failed credentials -> AP mode. SSID 'GeyserDiverter-3A1F', http://192.168.4.1/
 [WEBUI] Local web server started on port 80
 [TEMP] MAX31865 initialized (PT1000, assumed 3-wire — confirm on hardware)
 [CURRENT] CT/voltage sensing initialized — calibration constants are PLACEHOLDERS, see README
+[INVERTER] RS-485 bus initialized. No protocol selected yet -- using NullInverter stand-in.
 [HEARTBEAT] alive, uptime=0s, fault=no
 ...
 ```
@@ -243,6 +283,27 @@ V0.6 until they do — this is the one stage where "the code looks right" isn't
 good enough, since it's the first thing standing between firmware and
 whatever's actually wired to the SSR.
 
+## Testing the RS-485 transport
+
+There's no real inverter protocol yet, so this only proves the transport
+layer (UART framing + DE/RE turnaround) works — not communication with any
+actual inverter:
+
+1. Jumper GPIO17 (TX) directly to GPIO18 (RX) — a single wire between the two
+   pins on the ESP32 is enough; you don't need the RS-485 transceiver chip
+   wired up for this specific test.
+2. Browse to `/inverter`, click "Run RS-485 loopback test".
+3. Confirm it reports `PASS`. A `FAIL` with nothing received usually means
+   the jumper isn't making contact; a `FAIL` with garbled bytes back usually
+   means a wiring or baud-rate mismatch — check `RS485Bus::begin()`'s default
+   (9600 8N1) against what you're actually testing against, if you've since
+   wired in a real transceiver.
+4. If you *do* have the RS-485 transceiver and a spare device that can send
+   arbitrary serial data (a USB-RS485 adapter, a second microcontroller), you
+   can additionally confirm actual line signaling (A/B differential voltage,
+   correct idle-high state) with a scope or logic analyzer — the loopback
+   test alone only proves the ESP32 side, not the transceiver.
+
 ## Testing the watchdog
 
 Still the one V0.1 behavior worth proving on the bench, not just trusting:
@@ -268,17 +329,22 @@ Still the one V0.1 behavior worth proving on the bench, not just trusting:
 
 ## Not built yet
 
-Everything else in the staged plan (Specification §28): inverter RS-485
-(V0.6), the surplus-solar algorithm (V0.7) — which is also where CT
-polarity/import-export direction lands, see above — battery protection
-(V0.8), automatic control (V0.9), cloud pairing (V0.10), then full fault
-handling + data logging (V1.0), including the latched,
-acknowledgement-required fault behavior Specification §16 actually asks for;
-every fault source built so far auto-clears once its condition goes away,
-which is a deliberate simplification until V1.0, not the final behavior.
-V0.5's SSR control is manual and time-limited only — there is still no
-connection at all between temperature/current readings and the output; that
-tie-in doesn't arrive until V0.9. Each stage gets the same treatment this one
+**A real inverter protocol** — see the V0.6 section above. This is the one
+gap in the staged plan that isn't just "later," it's "waiting on knowing
+which inverter this targets." Everything else it needs (the interface, the
+transport, the polling loop) is already there.
+
+Beyond that, everything else in the staged plan (Specification §28): the
+surplus-solar algorithm (V0.7) — which is also where CT polarity/import-export
+direction lands, see above — battery protection (V0.8), automatic control
+(V0.9), cloud pairing (V0.10), then full fault handling + data logging
+(V1.0), including the latched, acknowledgement-required fault behavior
+Specification §16 actually asks for; every fault source built so far
+auto-clears once its condition goes away, which is a deliberate
+simplification until V1.0, not the final behavior. V0.5's SSR control is
+manual and time-limited only — there is still no connection at all between
+temperature/current/inverter readings and the output; that tie-in doesn't
+arrive until V0.9. Each stage gets the same treatment this one
 did: build it, bench-test it on real hardware, confirm it fails safe, *then*
 move to the next stage — never all at once, and never near mains power until
 the stage that actually needs it says so.
