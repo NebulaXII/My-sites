@@ -2,6 +2,7 @@
 #include "wifi_manager.h"
 #include "settings.h"
 #include "faults.h"
+#include "temperature.h"
 #include <WebServer.h>
 
 namespace {
@@ -47,7 +48,7 @@ namespace {
             "footer{margin-top:28px;color:#8b9a8f;font-size:.75rem}";
     html += "</style></head><body>";
     html += body;
-    html += "<footer>Rev A4 Geyser Diverter &mdash; firmware V0.2</footer>";
+    html += "<footer>Rev A4 Geyser Diverter &mdash; firmware V0.3</footer>";
     html += "</body></html>";
     return html;
   }
@@ -63,7 +64,13 @@ namespace {
     body += "<tr><td class='k'>Address</td><td class='v'>" + WifiManager::ipAddress() + "</td></tr>";
     body += "<tr><td class='k'>Uptime</td><td class='v'>" + String(millis() / 1000) + "s</td></tr>";
     body += "<tr><td class='k'>Fault status</td><td class='v'>" + String(Faults::active() ? "FAULT" : "OK") + "</td></tr>";
-    body += "<tr><td class='k'>Sensors</td><td class='v'>not yet installed (V0.3+)</td></tr>";
+    if (Temperature::hasReading()){
+      body += "<tr><td class='k'>Geyser temperature</td><td class='v'>" + String(Temperature::celsius(), 1) + "&deg;C</td></tr>";
+    } else {
+      body += "<tr><td class='k'>Geyser temperature</td><td class='v'>" +
+        String(Temperature::sensorFaulted() ? "sensor fault" : "no reading yet") + "</td></tr>";
+    }
+    body += "<tr><td class='k'>Current/voltage sensing</td><td class='v'>not yet installed (V0.4+)</td></tr>";
     body += "</table>";
     body += "<a class='btn' href='/wifi'>Wi-Fi &amp; device settings</a>";
     httpServer.send(200, "text/html", pageShell(Settings::deviceName(), body));
@@ -123,12 +130,14 @@ namespace {
   void handleApiStatus(){
     String json = "{";
     json += "\"device_name\":\"" + Settings::deviceName() + "\",";
-    json += "\"firmware_stage\":\"V0.2\",";
+    json += "\"firmware_stage\":\"V0.3\",";
     json += "\"wifi_status\":\"" + WifiManager::statusText() + "\",";
     json += "\"ip\":\"" + WifiManager::ipAddress() + "\",";
     json += "\"uptime_s\":" + String(millis() / 1000) + ",";
     json += "\"fault_active\":" + String(Faults::active() ? "true" : "false") + ",";
-    json += "\"sensors_installed\":false";
+    json += "\"temperature_c\":" + (Temperature::hasReading() ? String(Temperature::celsius(), 2) : String("null")) + ",";
+    json += "\"temperature_installed\":true,";
+    json += "\"current_voltage_installed\":false";
     json += "}";
     httpServer.send(200, "application/json", json);
   }

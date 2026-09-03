@@ -27,7 +27,7 @@ void System::begin(){
   Serial.begin(115200);
   delay(200); // let the USB-serial bridge settle before the first log line
   Serial.println();
-  Serial.println("[BOOT] Geyser Diverter firmware V0.2 (+ Wi-Fi, local web UI)");
+  Serial.println("[BOOT] Geyser Diverter firmware V0.3 (+ PT1000 temperature)");
   Serial.println("[BOOT] Outputs initialized to safe (LOW) default state");
   Serial.println("[BOOT] If GPIO7/8/9 have no LEDs wired yet, watch this log instead —");
   Serial.println("[BOOT] every heartbeat line below is the same signal the LED shows.");
@@ -58,7 +58,7 @@ void System::loop(){
   }
 
   if (watchdogTestArmed && now > 5000){
-    Faults::raise("watchdog-test intentional hang");
+    Faults::raise(Faults::Source::WATCHDOG_TEST, "intentional hang for self-test");
     Serial.println("[TEST] Hanging now — expect a reset in <=5s if the watchdog is working.");
     while (true) { /* deliberately unresponsive: stops feeding the watchdog on purpose */ }
   }

@@ -1,15 +1,26 @@
 #pragma once
 
-// Minimal in-RAM fault flag for V0.1 bring-up only.
+// Per-source fault tracking. Specification §16 lists a fixed set of fault
+// conditions this firmware will eventually detect; sources are added here as
+// the stage that can actually detect them is built. Kept as a flat enum +
+// bool array on purpose — the fault list is small and fixed, not a reason to
+// build a generic event bus.
 //
-// Real fault codes, latching-with-required-acknowledgement, and persistence
-// across a reset (Specification §16) are a later stage's job — this module
-// only proves the LED + logging path end to end so later stages have
-// something to plug real fault sources into.
+// Real latching-with-required-acknowledgement (§16) is explicitly a V1.0
+// deliverable per the staged build order — until then, a source clears its
+// own fault automatically once the underlying condition goes away.
 
 namespace Faults {
+  enum class Source {
+    WATCHDOG_TEST,  // V0.1 self-test only
+    SENSOR_TEMP,    // V0.3: MAX31865 fault flag or an implausible reading
+    COUNT
+  };
+
   void begin();
-  void raise(const char *reason);
-  void clear();
-  bool active();
+  void raise(Source source, const char *reason);
+  void clear(Source source);
+
+  bool active();                  // true if ANY source is currently faulted
+  bool active(Source source);
 }

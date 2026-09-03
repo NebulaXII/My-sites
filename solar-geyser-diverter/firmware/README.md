@@ -1,10 +1,11 @@
-# Geyser Diverter Firmware — V0.2
+# Geyser Diverter Firmware — V0.3
 
 Staged ESP32-S3 firmware per `../SPECIFICATION.md` §28's build order. Currently
 implements:
 
 > **V0.1** — ESP32 boot + LEDs + watchdog.
 > **V0.2** — Wi-Fi + web interface.
+> **V0.3** — PT1000 temperature measurement.
 
 No sensors, no power output, nothing that touches the 230V stage — that's still
 several stages out. Per the specification's own closing note, the power stage
@@ -37,8 +38,31 @@ that drives a relay, SSR, or contactor — there's nothing to connect yet.
   - `/wifi/reset` — forget the saved network and restart into setup mode.
   - `/api/status` — the same status as JSON, for future use.
 
+**V0.3 (PT1000 temperature), added this stage:**
+- `temperature.h/.cpp` — reads the geyser temperature via a MAX31865 RTD
+  front-end over SPI (Specification §7), using the
+  [Adafruit MAX31865 library](https://github.com/adafruit/Adafruit_MAX31865)
+  (`lib_deps` in `platformio.ini`, fetched automatically by PlatformIO).
+  Polls every 250ms. Reports a fault (`Faults::Source::SENSOR_TEMP`) on any
+  MAX31865 fault flag (open/short/wiring/supply) *or* a reading outside a
+  plausible physical range, instead of trusting a garbage value — matching
+  Specification §16's sensor-disconnected/shorted fault requirement.
+- `faults.h/.cpp` reworked to track fault sources independently (a fixed
+  enum + bool array, not a generic event system) rather than one shared
+  flag, since temperature is now the second thing after the watchdog
+  self-test that can raise/clear a fault, and they must not step on
+  each other.
+- The `/` status page and `/api/status` now show a real temperature reading
+  instead of a placeholder.
+
 Pin numbers come from `../PIN_ASSIGNMENT.md` §8 via `src/pins.h` — the single
 place to change if your board's wiring differs.
+
+**Confirm before trusting a reading:** `temperature.cpp` assumes PT1000 with a
+4300Ω reference resistor and 3-wire RTD wiring — the standard pairing, but
+*your* MAX31865 breakout/PCB may differ (2-wire, 4-wire, a different Rref).
+Check the constants at the top of that file against your actual hardware
+before relying on the numbers it reports.
 
 ## Build and flash
 
@@ -80,17 +104,33 @@ Wi-Fi" button on the `/wifi` page (or wipe flash / erase NVS).
 would show:
 
 ```
-[BOOT] Geyser Diverter firmware V0.2 (+ Wi-Fi, local web UI)
+[BOOT] Geyser Diverter firmware V0.3 (+ PT1000 temperature)
 [BOOT] Outputs initialized to safe (LOW) default state
 [BOOT] Watchdog armed: 5s timeout
 [WIFI] No/failed credentials -> AP mode. SSID 'GeyserDiverter-3A1F', http://192.168.4.1/
 [WEBUI] Local web server started on port 80
+[TEMP] MAX31865 initialized (PT1000, assumed 3-wire — confirm on hardware)
 [HEARTBEAT] alive, uptime=0s, fault=no
 ...
 ```
 
 Once connected to a real network, `[WIFI] Connected. IP: 192.168.x.x` replaces
 the AP-mode line, and `LED_LINK` goes solid.
+
+## Verifying the temperature reading
+
+This is the one thing in V0.3 actually worth checking on the bench, not just
+trusting the code compiled:
+
+1. Browse to the device's `/` page (or `/api/status`) with the PT1000 wired up.
+2. At room temperature it should read roughly 18–25°C. If it's wildly off, the
+   wire-count setting (2/3/4-wire) or Rref constant almost certainly doesn't
+   match your actual board — check `temperature.cpp` against your hardware.
+3. Unplug the PT1000 (or short its leads, briefly, if you're confident in the
+   wiring) and confirm the fault status flips to FAULT with a sensible reason
+   logged (`[FAULT] sensor-temp: ...`), and back to OK once reconnected —
+   this is the behavior Specification §16 actually cares about, not just a
+   plausible-looking number when everything's working.
 
 ## Testing the watchdog
 
@@ -117,11 +157,14 @@ Still the one V0.1 behavior worth proving on the bench, not just trusting:
 
 ## Not built yet
 
-Everything else in the staged plan (Specification §28): PT1000 temperature
-(V0.3), CT current sensing (V0.4), manual SSR control (V0.5), inverter RS-485
-(V0.6), the surplus-solar algorithm (V0.7), battery protection (V0.8), automatic
-control (V0.9), cloud pairing (V0.10), then full fault handling + data logging
-(V1.0). Each stage gets the same treatment this one did: build it, bench-test it
-on real hardware, confirm it fails safe, *then* move to the next stage — never
+Everything else in the staged plan (Specification §28): CT current sensing
+(V0.4), manual SSR control (V0.5), inverter RS-485 (V0.6), the surplus-solar
+algorithm (V0.7), battery protection (V0.8), automatic control (V0.9), cloud
+pairing (V0.10), then full fault handling + data logging (V1.0) — including
+the latched, acknowledgement-required fault behavior Specification §16
+actually asks for; V0.3's fault handling auto-clears once the condition goes
+away, which is a deliberate simplification until V1.0, not the final behavior.
+Each stage gets the same treatment this one did: build it, bench-test it on
+real hardware, confirm it fails safe, *then* move to the next stage — never
 all at once, and never near mains power until the stage that actually needs it
 says so.
