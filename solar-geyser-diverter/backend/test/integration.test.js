@@ -47,6 +47,14 @@ async function main() {
     assertStatus(res, 200, "health check");
     console.log("PASS: health check");
 
+    res = await fetch(`${BASE}/api/health`);
+    assert.equal(res.headers.get("access-control-allow-origin"), "*", "CORS header present for browser clients");
+    console.log("PASS: CORS header present");
+
+    res = await fetch(`${BASE}/api/dev/provision-device`, { method: "POST" });
+    assertStatus(res, 404, "dev provisioning endpoint disabled by default (ALLOW_DEV_PROVISIONING unset)");
+    console.log("PASS: dev provisioning disabled by default");
+
     res = await fetch(`${BASE}/api/auth/signup`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -216,7 +224,7 @@ async function main() {
     assert.equal((await res.json()).length, 0, "device list empty after unclaim");
     console.log("PASS: unclaim");
 
-    console.log("\nALL TESTS PASSED");
+    console.log("PASS: main flow complete");
   } finally {
     server.kill();
     await once(server, "exit").catch(() => {});
@@ -224,7 +232,55 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("TEST FAILED:", err);
-  process.exit(1);
-});
+// Separate short-lived server instance with the flag actually turned on —
+// confirms the endpoint really works when opted into, not just that it's
+// off by default.
+async function testDevProvisioningEnabled() {
+  const dbPath = new URL("./test-dev.sqlite", import.meta.url).pathname;
+  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  const port = PORT + 1;
+  const base = `http://127.0.0.1:${port}`;
+
+  const server = spawn(process.execPath, [new URL("../src/server.js", import.meta.url).pathname], {
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DB_PATH: dbPath,
+      JWT_SECRET: "test-jwt-secret",
+      MANUFACTURING_KEY: "test-manufacturing-key",
+      ALLOW_DEV_PROVISIONING: "true",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let output = "";
+  server.stdout.on("data", (d) => (output += d));
+  server.stderr.on("data", (d) => (output += d));
+
+  try {
+    const deadline = Date.now() + 5000;
+    while (!output.includes("listening") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(output.includes("listening"), "second server did not start in time:\n" + output);
+
+    const res = await fetch(`${base}/api/dev/provision-device`, { method: "POST" });
+    assertStatus(res, 201, "dev provisioning works when explicitly enabled");
+    const body = await res.json();
+    assert.match(body.device_id, /^GD-[0-9A-F]{4}-[0-9A-F]{4}$/, "provisioned device_id format");
+    assert.match(body.claim_code, /^\d{6}$/, "provisioned claim_code format");
+    console.log("PASS: dev provisioning works when ALLOW_DEV_PROVISIONING=true");
+  } finally {
+    server.kill();
+    await once(server, "exit").catch(() => {});
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  }
+}
+
+main()
+  .then(testDevProvisioningEnabled)
+  .then(() => console.log("\nALL TESTS PASSED"))
+  .catch((err) => {
+    console.error("TEST FAILED:", err);
+    process.exit(1);
+  });
