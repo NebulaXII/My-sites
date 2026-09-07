@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./validateEnv.js"; // must stay the first import — validates secrets, warns on risky config
 import express from "express";
 import { authRouter } from "./routes/auth.js";
 import { manufacturingRouter } from "./routes/manufacturing.js";
@@ -8,16 +8,35 @@ import { devRouter } from "./routes/dev.js";
 import "./db.js"; // runs schema init as a side effect
 
 const app = express();
+
+// Only needed behind a reverse proxy (nginx/Caddy, or most hosting
+// platforms) — without it, express-rate-limit below sees the proxy's IP for
+// every request instead of the real client's, and either rate-limits
+// everyone together or no one at all. Leave unset for direct/local use.
+if (process.env.TRUST_PROXY === "true") {
+  app.set("trust proxy", 1);
+}
+
 app.use(express.json());
 
-// Permissive CORS so a browser-hosted client (the web app, self-hosted or
-// opened as a local file — an Artifact's sandbox blocks this entirely
-// regardless of CORS, see ../README.md) can call this API cross-origin.
-// Safe here because auth is a Bearer/Basic header, not a cookie — there's no
-// CSRF exposure from allowing any origin. Restrict this to known origins
-// before any real deployment, though; wildcard is a dev/test convenience.
+// CORS: allowlist-based when ALLOWED_ORIGINS is set (comma-separated real
+// origins), wildcard otherwise for local/dev convenience — validateEnv.js
+// already warned at startup if it's falling back to wildcard. Safe to allow
+// broadly even so, because auth here is a Bearer/Basic header, not a
+// cookie — there's no CSRF exposure from allowing an origin, only from
+// allowing one that shouldn't see the response, which the allowlist covers.
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+  : null;
+
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
+  const origin = req.get("origin");
+  if (!allowedOrigins) {
+    res.header("Access-Control-Allow-Origin", "*");
+  } else if (origin && allowedOrigins.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Vary", "Origin");
+  }
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Manufacturing-Key");
   res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   if (req.method === "OPTIONS") return res.sendStatus(204);

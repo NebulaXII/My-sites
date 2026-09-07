@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { db } from "../db.js";
 import { hashSecret, verifySecret, signUserToken } from "../auth.js";
+import { loginLimiter, signupLimiter } from "../middleware/rateLimits.js";
 
 export const authRouter = Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-authRouter.post("/signup", (req, res) => {
+authRouter.post("/signup", signupLimiter, (req, res) => {
   const { email, password } = req.body || {};
   if (typeof email !== "string" || !EMAIL_RE.test(email)) {
     return res.status(400).json({ error: "a valid email is required" });
@@ -27,7 +28,7 @@ authRouter.post("/signup", (req, res) => {
   res.status(201).json({ token: signUserToken(info.lastInsertRowid) });
 });
 
-authRouter.post("/login", (req, res) => {
+authRouter.post("/login", loginLimiter, (req, res) => {
   const { email, password } = req.body || {};
   const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
   if (!user || !verifySecret(password, user.password_hash)) {

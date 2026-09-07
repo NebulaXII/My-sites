@@ -25,8 +25,8 @@ async function main() {
       ...process.env,
       PORT: String(PORT),
       DB_PATH,
-      JWT_SECRET: "test-jwt-secret",
-      MANUFACTURING_KEY: "test-manufacturing-key",
+      JWT_SECRET: "test-jwt-secret-that-is-definitely-long-enough-1234",
+      MANUFACTURING_KEY: "test-manufacturing-key-that-is-long-enough-5678",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -90,7 +90,7 @@ async function main() {
 
     res = await fetch(`${BASE}/api/manufacturing/devices`, {
       method: "POST",
-      headers: { "x-manufacturing-key": "test-manufacturing-key" },
+      headers: { "x-manufacturing-key": "test-manufacturing-key-that-is-long-enough-5678" },
     });
     assertStatus(res, 201, "manufacture device");
     const { device_id, device_secret, claim_code } = await res.json();
@@ -246,8 +246,8 @@ async function testDevProvisioningEnabled() {
       ...process.env,
       PORT: String(port),
       DB_PATH: dbPath,
-      JWT_SECRET: "test-jwt-secret",
-      MANUFACTURING_KEY: "test-manufacturing-key",
+      JWT_SECRET: "test-jwt-secret-that-is-definitely-long-enough-1234",
+      MANUFACTURING_KEY: "test-manufacturing-key-that-is-long-enough-5678",
       ALLOW_DEV_PROVISIONING: "true",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -277,8 +277,137 @@ async function testDevProvisioningEnabled() {
   }
 }
 
+async function testWeakSecretRejected() {
+  const server = spawn(process.execPath, [new URL("../src/server.js", import.meta.url).pathname], {
+    env: {
+      ...process.env,
+      PORT: String(PORT + 2),
+      DB_PATH: new URL("./test-weak.sqlite", import.meta.url).pathname,
+      JWT_SECRET: "too-short",
+      MANUFACTURING_KEY: "also-too-short",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let output = "";
+  server.stdout.on("data", (d) => (output += d));
+  server.stderr.on("data", (d) => (output += d));
+
+  const [code] = await once(server, "exit");
+  assert.notEqual(code, 0, "server exits non-zero on a weak/placeholder secret");
+  assert.ok(!output.includes("listening"), "server never reports listening with a weak secret");
+  assert.match(output, /too short|placeholder/, "error message explains why it refused to start");
+  console.log("PASS: server refuses to start with a weak/placeholder secret");
+
+  const dbPath = new URL("./test-weak.sqlite", import.meta.url).pathname;
+  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+}
+
+async function testRateLimiting() {
+  const dbPath = new URL("./test-ratelimit.sqlite", import.meta.url).pathname;
+  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  const port = PORT + 3;
+  const base = `http://127.0.0.1:${port}`;
+
+  const server = spawn(process.execPath, [new URL("../src/server.js", import.meta.url).pathname], {
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DB_PATH: dbPath,
+      JWT_SECRET: "test-jwt-secret-that-is-definitely-long-enough-1234",
+      MANUFACTURING_KEY: "test-manufacturing-key-that-is-long-enough-5678",
+      LOGIN_RATE_LIMIT_MAX: "3",
+      AUTH_RATE_LIMIT_WINDOW_MS: "60000",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let output = "";
+  server.stdout.on("data", (d) => (output += d));
+  server.stderr.on("data", (d) => (output += d));
+
+  try {
+    const deadline = Date.now() + 5000;
+    while (!output.includes("listening") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(output.includes("listening"), "rate-limit test server did not start in time:\n" + output);
+
+    let lastStatus;
+    for (let i = 0; i < 4; i++) {
+      const res = await fetch(`${base}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "nobody@example.com", password: "wrong" }),
+      });
+      lastStatus = res.status;
+      if (i < 3) assert.equal(res.status, 401, `attempt ${i + 1} within the limit gets a normal auth failure`);
+    }
+    assert.equal(lastStatus, 429, "4th login attempt within the window is rate-limited");
+    console.log("PASS: login rate limiting kicks in after LOGIN_RATE_LIMIT_MAX attempts");
+  } finally {
+    server.kill();
+    await once(server, "exit").catch(() => {});
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  }
+}
+
+async function testCorsAllowlist() {
+  const dbPath = new URL("./test-cors.sqlite", import.meta.url).pathname;
+  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  const port = PORT + 4;
+  const base = `http://127.0.0.1:${port}`;
+
+  const server = spawn(process.execPath, [new URL("../src/server.js", import.meta.url).pathname], {
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DB_PATH: dbPath,
+      JWT_SECRET: "test-jwt-secret-that-is-definitely-long-enough-1234",
+      MANUFACTURING_KEY: "test-manufacturing-key-that-is-long-enough-5678",
+      ALLOWED_ORIGINS: "https://allowed.example.com, https://also-allowed.example.com",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let output = "";
+  server.stdout.on("data", (d) => (output += d));
+  server.stderr.on("data", (d) => (output += d));
+
+  try {
+    const deadline = Date.now() + 5000;
+    while (!output.includes("listening") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(output.includes("listening"), "CORS test server did not start in time:\n" + output);
+
+    let res = await fetch(`${base}/api/health`, { headers: { origin: "https://allowed.example.com" } });
+    assert.equal(
+      res.headers.get("access-control-allow-origin"),
+      "https://allowed.example.com",
+      "allowed origin is echoed back"
+    );
+    console.log("PASS: CORS allows a listed origin");
+
+    res = await fetch(`${base}/api/health`, { headers: { origin: "https://not-allowed.example.com" } });
+    assert.equal(
+      res.headers.get("access-control-allow-origin"),
+      null,
+      "unlisted origin gets no CORS header — the browser enforces the actual block"
+    );
+    console.log("PASS: CORS omits the header for an origin not on the allowlist");
+  } finally {
+    server.kill();
+    await once(server, "exit").catch(() => {});
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+  }
+}
+
 main()
   .then(testDevProvisioningEnabled)
+  .then(testWeakSecretRejected)
+  .then(testRateLimiting)
+  .then(testCorsAllowlist)
   .then(() => console.log("\nALL TESTS PASSED"))
   .catch((err) => {
     console.error("TEST FAILED:", err);

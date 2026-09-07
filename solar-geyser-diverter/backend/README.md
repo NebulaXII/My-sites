@@ -93,20 +93,28 @@ npm test                  # full end-to-end test against a throwaway database
   filters on `claimed_by_user_id = req.userId`, and the integration test
   specifically confirms a second account gets a 404, not a 403 — deliberately
   not confirming a device even exists to someone who doesn't own it.
+- **Startup refuses to run with a weak or placeholder secret.**
+  `JWT_SECRET`/`MANUFACTURING_KEY` under 32 characters, missing, or still the
+  `.env.example` text cause the server to print why and exit(1) rather than
+  quietly running insecurely — `src/validateEnv.js`, tested.
+- **`qs` dependency vulnerability — fixed, not just flagged.** `npm audit`
+  now reports zero vulnerabilities: `package.json` pins `qs` to `^6.16.0` via
+  `overrides`, which contains the fix, without needing the breaking Express 5
+  migration. Verified: full test suite still passes against the overridden
+  version.
+- **Login/signup rate limiting** via `express-rate-limit` (`LOGIN_RATE_LIMIT_MAX`,
+  `SIGNUP_RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_WINDOW_MS` — see `.env.example`).
+  Tested with a low limit to actually trigger a 429, not just assumed to work
+  because the middleware is attached. If deployed behind a reverse proxy, set
+  `TRUST_PROXY=true` or every client will share the proxy's rate-limit bucket.
+- **CORS is now allowlist-based when configured** (`ALLOWED_ORIGINS`,
+  comma-separated). Falls back to wildcard with a startup warning if unset —
+  fine for local dev, meant to be set before any public deployment. Tested:
+  a listed origin gets the header back, an unlisted one gets no CORS header
+  at all (the browser enforces the actual block).
 
 ## Known gaps — not fixed, flagged instead of silently shipped
 
-- **`qs` dependency vulnerability (moderate).** `npm audit` flags a DoS-class
-  issue in `qs`, pulled in transitively via Express 4. `npm audit fix`
-  doesn't clear it without a major-version Express 5 upgrade, which changes
-  routing/error-handling semantics enough that it needs its own testing pass
-  rather than being folded in here silently. Practical exposure is low (this
-  app doesn't use `express.urlencoded()`, and query-string use is limited to
-  one simple `?range=` parameter), but it's a real flagged dependency issue,
-  not a clean bill of health.
-- **No rate limiting** on `/api/auth/login` or anywhere else. Fine for a
-  local/dev instance, not fine to expose publicly as-is — add a rate limiter
-  (e.g. `express-rate-limit`) before any real deployment.
 - **The manufacturing endpoint is gated by one static shared key**, not
   per-operator credentials or an audit trail. Adequate for a small
   production run bootstrapped by one or two people; a real manufacturing
@@ -120,13 +128,20 @@ npm test                  # full end-to-end test against a throwaway database
 - **`ONLINE_THRESHOLD_S` (60s) is a guess**, not tuned against the firmware's
   actual future check-in interval, since `cloud_sync` doesn't exist yet.
   Revisit once it does.
+- **Rate limiting is in-memory**, per server process. Fine for a single
+  instance; if this ever runs as multiple replicas behind a load balancer,
+  each replica tracks its own limits independently, which effectively
+  multiplies the real limit by the replica count. A shared store (Redis) is
+  the standard fix, not built here since there's only ever one instance so far.
 
 ## Deploying it
 
 Needs, at minimum: a host that gives you a public HTTPS URL (Fly.io, Render,
 Railway, or a VPS behind Caddy/nginx all work — none of this app is tied to
-one), the two secrets in `.env` set to real random values (never the example
-placeholders), and the SQLite file on persistent storage (or swap to
+one), the two secrets in `.env` set to real random values (the server won't
+start otherwise), `ALLOW_DEV_PROVISIONING` unset or `false`, `ALLOWED_ORIGINS`
+set to your real frontend's origin, `TRUST_PROXY=true` if there's a reverse
+proxy in front of it, and the SQLite file on persistent storage (or swap to
 Postgres if the host doesn't offer a persistent disk). None of that can be
 verified from here — there's no real domain or TLS certificate available in
 this environment, so "it runs and the tests pass" is as far as this session
