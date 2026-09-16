@@ -1,0 +1,33 @@
+# Render Blueprint for the Geyser Diverter cloud backend
+# (solar-geyser-diverter/backend). Deploy via https://render.com/deploy
+# or "New +" -> "Blueprint" in the Render dashboard, pointing at this repo.
+#
+# Secrets (JWT_SECRET, MANUFACTURING_KEY, ALLOWED_ORIGINS) are deliberately
+# left out of this file (sync: false) — Render will prompt for them once in
+# the dashboard rather than storing real secrets in git.
+services:
+  - type: web
+    name: geyser-diverter-backend
+    runtime: node
+    rootDir: solar-geyser-diverter/backend
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    disk:
+      name: geyser-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DB_PATH
+        value: /var/data/data.sqlite
+      - key: TRUST_PROXY
+        value: "true"
+      - key: ALLOW_DEV_PROVISIONING
+        value: "false"
+      - key: JWT_SECRET
+        sync: false
+      - key: MANUFACTURING_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false

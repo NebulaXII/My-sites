@@ -147,3 +147,36 @@ verified from here — there's no real domain or TLS certificate available in
 this environment, so "it runs and the tests pass" is as far as this session
 can confirm; reachability from an actual ESP32 on a real network is the next
 thing to prove once it's deployed somewhere real.
+
+### Render, specifically
+
+`../../render.yaml` (repo root) is a Blueprint that maps directly onto this
+section — `rootDir` points at this folder, `disk` gives the SQLite file
+persistent storage across restarts/deploys (needs the paid Starter plan;
+Render's free tier has no persistent disk, so the database would reset on
+every restart), and the three real secrets are marked `sync: false` so
+Render prompts for them once in its dashboard rather than storing them in
+git. Steps:
+
+1. Push this repo to GitHub (already done if you're reading this from the
+   repo).
+2. On [render.com](https://render.com), **New +** → **Blueprint**, pick this
+   repo. Render reads `render.yaml` and proposes one service
+   (`geyser-diverter-backend`) with a 1GB disk.
+3. When prompted, fill in the three secrets:
+   - `JWT_SECRET` / `MANUFACTURING_KEY` — generate each separately with
+     `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
+     Never reuse one for both, never reuse your local `.env` values for a
+     real deployment.
+   - `ALLOWED_ORIGINS` — the origin(s) that will actually call this API from
+     a browser (e.g. `https://your-username.github.io`). Comma-separated,
+     no trailing slash.
+4. Deploy. First build takes a few minutes. Once live, confirm with:
+   `curl https://<your-service>.onrender.com/api/health` → `{"status":"ok"}`.
+5. Point the web app's "Backend URL" field (or the firmware's `cloud_sync`
+   config, once built) at that same `https://<your-service>.onrender.com`
+   URL instead of `http://localhost:8787`.
+
+Nothing above can be verified from this session — there's no real Render
+account or domain reachable from here — so treat step 4's health check as
+the first real proof it worked.
