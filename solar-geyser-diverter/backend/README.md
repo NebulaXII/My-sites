@@ -151,18 +151,34 @@ thing to prove once it's deployed somewhere real.
 ### Render, specifically
 
 `../../render.yaml` (repo root) is a Blueprint that maps directly onto this
-section — `rootDir` points at this folder, `disk` gives the SQLite file
-persistent storage across restarts/deploys (needs the paid Starter plan;
-Render's free tier has no persistent disk, so the database would reset on
-every restart), and the three real secrets are marked `sync: false` so
-Render prompts for them once in its dashboard rather than storing them in
-git. Steps:
+section — `rootDir` points at this folder, and the three real secrets are
+marked `sync: false` so Render prompts for them once in its dashboard
+rather than storing them in git.
+
+It's set to the **free plan** on purpose — this is for testing/demoing a
+prototype, not a paying customer's production backend. Two things to know
+about free:
+
+- The service sleeps after ~15 min idle, then takes ~30-50s to wake up on
+  the next request. Fine for a demo, mildly annoying if it's gone cold.
+- There's no persistent disk, so the SQLite database resets on every
+  restart/redeploy/sleep-wake cycle — every paired device and account
+  vanishes and has to be re-paired. Fine for "show it working," not fine
+  for "someone relies on this being there tomorrow."
+
+When this stops being a test and becomes a real deployment someone
+actually depends on, switch `plan: free` to `plan: starter` (~$7/mo) and
+uncomment the `disk:`/`DB_PATH` lines in `render.yaml` so the database
+survives restarts — see the free-vs-starter trade-off comment right there
+in the file.
+
+Steps:
 
 1. Push this repo to GitHub (already done if you're reading this from the
    repo).
 2. On [render.com](https://render.com), **New +** → **Blueprint**, pick this
-   repo. Render reads `render.yaml` and proposes one service
-   (`geyser-diverter-backend`) with a 1GB disk.
+   repo. Render reads `render.yaml` and proposes one free service
+   (`geyser-diverter-backend`).
 3. When prompted, fill in the three secrets:
    - `JWT_SECRET` / `MANUFACTURING_KEY` — generate each separately with
      `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
